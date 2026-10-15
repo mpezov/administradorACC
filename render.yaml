@@ -1,0 +1,38 @@
+# Blueprint de Render: Administrador ACC (usa la misma base que el visor, visorbimgis-db).
+# Las variables con sync: false se cargan en el panel de Render.
+services:
+  - type: web
+    name: administrador-acc
+    runtime: python
+    plan: free
+    region: virginia
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn "app:create_app()" --bind 0.0.0.0:$PORT --timeout 120 --workers 2
+    healthCheckPath: /admin/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: MIRROR_ENABLED
+        value: "false"
+      - key: ENABLE_SCHEDULER
+        value: "false"
+      - key: ADMIN_USER
+        value: admin
+      - key: ADMIN_PASSWORD
+        generateValue: true
+      - key: POSTGRES_HOST
+        sync: false
+      - key: POSTGRES_PORT
+        value: "5432"
+      - key: POSTGRES_DB
+        sync: false
+      - key: POSTGRES_USER
+        sync: false
+      - key: POSTGRES_PASSWORD
+        sync: false
+      - key: APS_CLIENT_ID_S2S
+        sync: false
+      - key: APS_CLIENT_SECRET_S2S
+        sync: false
+      - key: BIM_VIEW_EXTENSIONS
+        value: nwd,nwc,rvt,ifc
