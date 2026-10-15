@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><div><h1>Portafolio de proyectos</h1><p>Indicadores, inventario ACC y modelos 3D/BIM candidatos al visor.</p></div></div>
+{% if run_status %}<div class="sync-banner {{ 'running' if run_status.status == 'RUNNING' else ('ok' if run_status.status == 'OK' else 'failed') }}"><div><strong>{% if run_status.status == 'RUNNING' %}Inventario ACC actualizándose{% elif run_status.status == 'OK' %}Último inventario completado{% else %}Último inventario con incidencias{% endif %}</strong><span>ETL #{{ run_status.id }} · inicio {{ run_status.started_at }}</span></div>{% if run_status.status == 'RUNNING' %}<div class="sync-note">Los conteos pueden crecer mientras continúa la sincronización.</div>{% endif %}</div>{% endif %}
+<div class="kpi-grid">
+  <div class="kpi-card"><span>Proyectos analizados</span><strong>{{ global_stats.total_projects or 0 }}</strong></div>
+  <div class="kpi-card"><span>Con modelos 3D/BIM</span><strong>{{ global_stats.projects_with_bim or 0 }}</strong></div>
+  <div class="kpi-card"><span>Modelos 3D/BIM activos</span><strong>{{ global_stats.bim_files or 0 }}</strong></div>
+  <div class="kpi-card"><span>NWD</span><strong>{{ global_stats.nwd_files or 0 }}</strong></div>
+  <div class="kpi-card"><span>Excluidos del análisis</span><strong>{{ global_stats.excluded_projects or 0 }}</strong></div>
+</div>
+<form method="get" class="portfolio-filters">
+  <input name="q" value="{{ q }}" placeholder="Buscar por proyecto, código, CUI o departamento...">
+  <select name="bim"><option value="all" {% if bim_filter == 'all' %}selected{% endif %}>Todos</option><option value="yes" {% if bim_filter == 'yes' %}selected{% endif %}>Con modelos 3D/BIM</option><option value="no" {% if bim_filter == 'no' %}selected{% endif %}>Sin modelos 3D/BIM</option></select>
+  <select name="scope">
+    <option value="analysis" {% if scope != 'all' %}selected{% endif %}>Solo análisis</option>
+    <option value="all" {% if scope == 'all' %}selected{% endif %}>Incluir excluidos</option>
+  </select>
+  <button type="submit" class="btn">Filtrar</button>
+</form>
+<div class="portfolio-count">
+  {{ projects|length }} proyecto(s) mostrados · modelos: {{ bim_view_exts|join(', ')|upper }} · DWG/DGN fuera del conteo BIM.
+  {% if scope != 'all' %}También se omiten proyectos marcados como NO VALE, PRUEBA, TEST, REPOSITORIO o MANTENIMIENTO.{% else %}<b>Vista ampliada: incluye proyectos normalmente excluidos.</b>{% endif %}
+</div>
+<div class="project-grid">
+{% for p in projects %}
+<article class="project-card {{ 'project-card-excluded' if p.analysis_excluded else '' }}">
+  {% if p.analysis_excluded %}<div class="excluded-badge">EXCLUIDO DEL ANÁLISIS</div>{% endif %}
+  <div class="project-card-head"><div><div class="project-code">{{ p.cod_wvs or 'SIN CÓDIGO' }}</div><h2>{{ p.nombre_proyecto or p.acc_name }}</h2>{% if p.nombre_proyecto and p.nombre_proyecto != p.acc_name %}<div class="acc-name">{{ p.acc_name }}</div>{% endif %}</div><span class="bim-badge {{ 'has' if p.bim_files else 'none' }}">{{ p.bim_files }} modelos</span></div>
+  <div class="project-meta"><span>{{ p.departamento or 'Departamento no vinculado' }}</span>{% if p.paquete %}<span>Paquete {{ p.paquete }}</span>{% endif %}{% if p.cui %}<span>CUI {{ p.cui }}</span>{% endif %}</div>
+  <div class="mini-kpis"><div><span>Físico</span><strong>{{ p.a_fisico|pct }}</strong></div><div><span>Financiero</span><strong>{{ (p.a_financiero if p.a_financiero is not none else p.porcentaje_avance_financiero)|pct }}</strong></div><div><span>Diseño</span><strong>{{ p.a_diseno|pct }}</strong></div></div>
+  <div class="model-summary"><div><b>{{ p.nwd_count }}</b> NWD</div><div><b>{{ p.rvt_count }}</b> RVT</div><div><b>{{ p.ifc_count }}</b> IFC</div><div><b>{{ p.nwc_count }}</b> NWC</div></div>
+  <div class="project-foot"><div><span>{{ p.folders_active }} carpetas · {{ p.items_active }} archivos</span>{% if p.last_bim_modified %}<span>Último BIM: {{ p.last_bim_modified }}</span>{% endif %}</div><a class="btn-small" href="/admin/project/{{ p.project_guid }}">Abrir proyecto</a></div>
+</article>
+{% else %}<div class="empty-card">No hay proyectos que coincidan con el filtro.</div>{% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{ model.item_name }} · Viewer ACC</title>
+  <link rel="stylesheet" href="https://developer.api.autodesk.com/modelderivative/v2/viewers/{{ viewer_version }}/style.min.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  <style>
+    html,body{height:100%;margin:0;overflow:hidden}
+    body{display:flex;flex-direction:column}
+    .remote-viewer-bar{flex:0 0 auto}
+    #apsViewer{position:relative;flex:1 1 auto;min-height:0}
+  </style>
+</head>
+<body>
+  <div class="remote-viewer-bar">
+    <a href="/admin/project/{{ project_guid }}">← Proyecto</a>
+    <div class="remote-viewer-title">
+      <strong>{{ model.item_name }}</strong>
+      <span>{{ model.derivative_format or 'Derivative ACC' }} · versión {{ model.latest_version_id.split('?version=')[-1] if model.latest_version_id and '?version=' in model.latest_version_id else '—' }}</span>
+    </div>
+    <div id="viewerState" class="remote-viewer-state">Inicializando…</div>
+  </div>
+  <div id="apsViewer"></div>
+  <script>
+    window.VIEWER_CONFIG = {
+      derivativeUrn: {{ model.derivative_urn|tojson }},
+      viewableGuid: {{ model.default_viewable_guid|tojson }},
+      derivativeFormat: {{ model.derivative_format|tojson }},
+      tokenUrl: "/admin/api/viewer/token"
+    };
+  </script>
+  <script src="https://developer.api.autodesk.com/modelderivative/v2/viewers/{{ viewer_version }}/viewer3D.min.js"></script>
+  <script src="{{ url_for('static', filename='viewer_remote.js') }}"></script>
+</body>
+</html>

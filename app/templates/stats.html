@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="stats-container">
+  <h2>Estadísticas del Inventario ACC</h2>
+
+  <!-- Tarjetas de resumen -->
+  <div class="stats-cards">
+    <div class="card">
+      <div class="card-value">{{ totals.total_projects }}</div>
+      <div class="card-label">Proyectos</div>
+    </div>
+    <div class="card">
+      <div class="card-value">{{ totals.total_folders }}</div>
+      <div class="card-label">Carpetas</div>
+    </div>
+    <div class="card">
+      <div class="card-value">{{ totals.total_items }}</div>
+      <div class="card-label">Archivos</div>
+    </div>
+    <div class="card">
+      <div class="card-value">{{ totals.total_versions }}</div>
+      <div class="card-label">Versiones</div>
+    </div>
+  </div>
+
+  <!-- Gráfico de extensiones (solo extensiones de interés) -->
+  <div class="chart-container">
+    <h3>Archivos por extensión (interés)</h3>
+    <canvas id="extChart"></canvas>
+    <div class="excluded-note">
+      <p>📊 Archivos con extensiones no mostradas (PDF, JPG, DOC, etc.): <strong>{{ total_excluded }}</strong></p>
+      <p class="small">Extensiones incluidas en el gráfico: dwg, dxf, tif, ifc, rvt, xml, zip, rar, kml, kmz, gdb, geojson, json, shp, dbf, aprx, idx</p>
+    </div>
+  </div>
+
+  <!-- Tabla: Archivos con más versiones -->
+  <div class="table-container">
+    <h3>Archivos con más versiones</h3>
+    <table class="stats-table">
+      <thead>
+        <tr>
+          <th>Proyecto</th>
+          <th>Carpeta</th>
+          <th>Archivo</th>
+          <th>Versiones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in top_versions %}
+        <tr>
+          <td>{{ item.project_name or item.project_guid }}</td>
+          <td>{{ item.folder_path_cached or '—' }}</td>
+          <td>{{ item.item_name }}</td>
+          <td>{{ item.version_count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Tabla: Proyectos con más archivos -->
+  <div class="table-container">
+    <h3>Proyectos con más archivos</h3>
+    <table class="stats-table">
+      <thead>
+        <tr>
+          <th>Proyecto</th>
+          <th>Hub</th>
+          <th>Total archivos</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for proj in top_projects %}
+        <tr>
+          <td>{{ proj.project_name or proj.id_guid }}</td>
+          <td>{{ proj.hub_name or '—' }}</td>
+          <td>{{ proj.total_files }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <a href="/admin/" class="btn">Volver al navegador</a>
+</div>
+
+<!-- Chart.js desde CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    try {
+        // Parsear el JSON string a objeto JavaScript
+        const extData = JSON.parse('{{ extensions|tojson|safe }}');
+        
+        if (!extData || typeof extData !== 'object' || Object.keys(extData).length === 0) {
+            document.getElementById('extChart').parentNode.innerHTML += '<p>No hay datos de extensiones de interés.</p>';
+            return;
+        }
+
+        const labels = Object.keys(extData);
+        const values = Object.values(extData);
+
+        const ctx = document.getElementById('extChart').getContext('2d');
+        new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Cantidad de archivos',
+                    data: values,
+                    backgroundColor: 'rgba(10, 43, 79, 0.7)',
+                    borderColor: 'rgba(10, 43, 79, 1)',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+    } catch (e) {
+        console.error('Error al cargar el gráfico:', e);
+        document.getElementById('extChart').parentNode.innerHTML += '<p>Error al cargar el gráfico: ' + e.message + '</p>';
+    }
+});
+</script>
+
+<style>
+.stats-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.stats-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+  margin: 2rem 0;
+}
+
+.card {
+  background: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+.card-value {
+  font-size: 2.5rem;
+  font-weight: 600;
+  color: #0a2b4f;
+}
+
+.card-label {
+  font-size: 1rem;
+  color: #666;
+  margin-top: 0.5rem;
+}
+
+.chart-container {
+  background: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin: 2rem 0;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+.excluded-note {
+    background: #f8f9fa;
+    padding: 0.8rem;
+    border-radius: 6px;
+    margin-top: 1rem;
+    font-size: 0.95rem;
+    border-left: 4px solid #0a2b4f;
+}
+.excluded-note .small {
+    font-size: 0.85rem;
+    color: #666;
+    margin-top: 0.3rem;
+}
+
+.table-container {
+  background: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin: 2rem 0;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  overflow-x: auto;
+}
+
+.stats-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.stats-table th {
+  background: #0a2b4f;
+  color: white;
+  padding: 0.75rem;
+  text-align: left;
+}
+
+.stats-table td {
+  padding: 0.75rem;
+  border-bottom: 1px solid #eee;
+}
+
+.stats-table tr:hover {
+  background: #f5f7fa;
+}
+</style>
+{% endblock %}

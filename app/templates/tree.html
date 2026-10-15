@@ -1,0 +1,67 @@
+{% macro qs(project, folder, open_ids) -%}
+?project={{ project }}{% if folder %}&folder={{ folder }}{% endif %}
+{%- for oid in open_ids %}&open={{ oid }}{% endfor -%}
+{%- if q %}&q={{ q }}{% endif -%}
+{%- if show_items %}&show_items=1{% endif -%}
+{%- endmacro %}
+
+
+{% macro render_node(fid, level, selected_folder, project_guid, open_ids, open_set) %}
+  {% set f = by_id[fid] %}
+  {% set kids = children.get(fid, []) %}
+  {% set has_kids = kids|length > 0 %}
+  {% set is_selected = selected_folder == fid %}
+  {% set is_open = fid in open_set %}
+
+  {# Nivel 0 = Project Files, nivel 1 = etapas principales #}
+  {% set auto_open = level <= 0 %}
+
+  <li class="li level-{{ level }}">
+    <div class="line">
+      {% if has_kids %}
+        {% if auto_open %}
+          <span class="twisty fixed-open">▾</span>
+        {% elif is_open %}
+          {% set new_open = [] %}
+          {% for x in open_ids %}
+            {% if x != fid %}
+              {% set _ = new_open.append(x) %}
+            {% endif %}
+          {% endfor %}
+          <a class="twisty" href="/admin/{{ qs(project_guid, selected_folder, new_open) }}" title="Contraer">▾</a>
+        {% else %}
+          {% set new_open = open_ids + [fid] %}
+          <a class="twisty" href="/admin/{{ qs(project_guid, selected_folder, new_open) }}" title="Expandir">▸</a>
+        {% endif %}
+      {% else %}
+        <span class="twisty placeholder"> </span>
+      {% endif %}
+
+      <a class="node {% if is_selected %}active{% endif %}"
+         href="/admin/{{ qs(project_guid, fid, open_ids) }}">
+        {{ f.label }}
+      </a>
+    </div>
+
+    {% if has_kids and (auto_open or is_open) %}
+      <ul class="ul">
+        {% for cid in kids %}
+          {{ render_node(cid, level + 1, selected_folder, project_guid, open_ids, open_set) }}
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </li>
+{% endmacro %}
+
+
+{% set selected_folder = folder_info.folder_id if folder_info else None %}
+
+{% if roots %}
+  <ul class="tree-ul">
+    {% for rid in roots %}
+      {{ render_node(rid, 0, selected_folder, selected_project, open_ids, open_set) }}
+    {% endfor %}
+  </ul>
+{% else %}
+  <div class="empty">No se encontró la carpeta raíz del proyecto.</div>
+{% endif %}

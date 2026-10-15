@@ -1,0 +1,21 @@
+# Lista blanca: solo se sube el código del Administrador web.
+/*
+!/.gitignore
+!/app/
+!/scripts/
+!/viewer_migrations/
+!/requirements.txt
+!/run.py
+!/run_waitress.py
+!/run_sync_bim_fast.py
+!/migrar_*.py
+!/verificar_*.py
+!/README_*.md
+!/.env.example
+!/.env.mirror.example
+!/.env.viewer.example
+!/render.yaml
+
+__pycache__/
+*.pyc
+app/templates/tree - copia.html

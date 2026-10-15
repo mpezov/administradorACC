@@ -1,0 +1,258 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="grid grid-3">
+  <!-- IZQUIERDA: árbol -->
+  <section class="panel panel-tree">
+    <div class="panel-head">
+      <h2>Carpetas</h2>
+
+      <!-- Buscar proyecto -->
+      <form method="get" action="/admin/" class="row search-row">
+        <input type="text" name="q" placeholder="Buscar proyecto..." value="{{ q|default('') }}">
+
+        {% if selected_project %}
+          <input type="hidden" name="project" value="{{ selected_project }}">
+        {% endif %}
+        {% if folder_info %}
+          <input type="hidden" name="folder" value="{{ folder_info.folder_id }}">
+        {% endif %}
+        {% if show_items %}
+          <input type="hidden" name="show_items" value="1">
+        {% endif %}
+        {% for oid in open_ids %}
+          <input type="hidden" name="open" value="{{ oid }}">
+        {% endfor %}
+
+        <button type="submit" class="btn-small">Buscar</button>
+      </form>
+
+      <!-- Selector de proyecto -->
+      <form method="get" action="/admin/" class="row">
+        <input type="hidden" name="q" value="{{ q|default('') }}">
+
+        <select name="project" onchange="this.form.submit()">
+          {% for p in projects %}
+            <option value="{{ p.project_guid }}" {% if p.project_guid == selected_project %}selected{% endif %}>
+              {{ (p.hub_name ~ " / " ~ p.name).strip(" /") }}
+            </option>
+          {% endfor %}
+        </select>
+
+        {% for oid in open_ids %}
+          <input type="hidden" name="open" value="{{ oid }}">
+        {% endfor %}
+      </form>
+    </div>
+
+    <div class="tree">
+      {% include "tree.html" %}
+    </div>
+  </section>
+
+  <!-- CENTRO: ítems -->
+  <section class="panel panel-items">
+    <h2>Ítems</h2>
+
+    {% if folder_info %}
+      <div class="card compact">
+        <div class="title">{{ folder_info.label }}</div>
+        <div class="meta">
+          <div><b>Ruta:</b> {{ folder_info.name_path }}</div>
+        </div>
+
+        <form method="get" action="/admin/" style="margin-top:12px;">
+          <input type="hidden" name="project" value="{{ selected_project }}">
+          <input type="hidden" name="folder" value="{{ folder_info.folder_id }}">
+          <input type="hidden" name="q" value="{{ q|default('') }}">
+          <input type="hidden" name="show_items" value="1">
+          {% for oid in open_ids %}
+            <input type="hidden" name="open" value="{{ oid }}">
+          {% endfor %}
+          <button type="submit" class="btn-small">Cargar ítems</button>
+        </form>
+      </div>
+
+      {% if show_items %}
+        <div class="items-box">
+          {% if items %}
+            <div class="items-count">{{ items|length }} ítem(s) mostrados</div>
+
+            <table class="items-table">
+              <thead>
+                <tr>
+                  <th>Nombre</th>
+                  <th>Ext</th>
+                  <th>Ver.</th>
+                  <th>OK</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for it in items %}
+                  <tr>
+                    <td title="{{ it.item_name }}">{{ it.item_name }}</td>
+                    <td>{{ it.ext or '' }}</td>
+                    <td>{{ it.version_count or '' }}</td>
+                    <td>
+                      {% if it.naming_ok is sameas true %}
+                        Sí
+                      {% elif it.naming_ok is sameas false %}
+                        No
+                      {% else %}
+                        —
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% else %}
+            <div class="empty">Esta carpeta no tiene ítems registrados.</div>
+          {% endif %}
+        </div>
+      {% else %}
+        <div class="empty" style="margin-top:12px;">
+          Presiona <b>Cargar ítems</b> para ver los archivos de esta carpeta.
+        </div>
+      {% endif %}
+    {% else %}
+      <div class="empty">
+        Selecciona una carpeta para consultar sus ítems.
+      </div>
+    {% endif %}
+  </section>
+
+  <!-- DERECHA: acciones -->
+  <section class="panel panel-actions">
+    <h2>Acciones</h2>
+
+    {% if folder_info %}
+      <div class="card compact">
+        <div class="title">{{ folder_info.label }}</div>
+
+        <form method="post" action="/admin/save_flags" class="form actions">
+          <input type="hidden" name="project_guid" value="{{ selected_project }}">
+          <input type="hidden" name="folder_id" value="{{ folder_info.folder_id }}">
+
+          <label class="action">
+            <span>tipo_GIS</span>
+            <input type="checkbox" name="tipo_gis" {% if folder_info.tipo_gis %}checked{% endif %}>
+          </label>
+
+          <label class="action">
+            <span>incidencias</span>
+            <input type="checkbox" name="incidencias" {% if folder_info.incidencias %}checked{% endif %}>
+          </label>
+
+          <button type="submit">Guardar</button>
+        </form>
+
+      </div>
+    {% else %}
+      <div class="empty">
+        Selecciona una carpeta.
+      </div>
+    {% endif %}
+    <div style="margin-top: 1rem;">
+        <button id="downloadSelectedGisBtn" class="btn">Descargar carpeta GIS</button>
+    </div>
+    <div style="margin-top: 2rem;">
+      <button id="detectGisBtn" class="btn">Detectar carpetas GIS</button>
+      <button id="downloadGisBtn" class="btn">Otros GIS</button>
+    </div>
+    <div id="jobStatus" style="margin-top: 1rem; font-size: 0.9rem;"></div>
+  </section>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const detectBtn = document.getElementById('detectGisBtn');
+  const downloadBtn = document.getElementById('downloadGisBtn');
+  const statusDiv = document.getElementById('jobStatus');
+  const downloadSelectedGisBtn = document.getElementById('downloadSelectedGisBtn');
+  function pollJob(jobId, onComplete) {
+    const interval = setInterval(() => {
+      fetch(`/admin/api/job/${jobId}`)
+        .then(r => r.json())
+        .then(job => {
+          let msg = `Trabajo #${jobId}: ${job.status}`;
+          if (job.progress) msg += ` ${job.progress}%`;
+          if (job.result) {
+            try {
+              const resultStr = typeof job.result === 'string' ? job.result : JSON.stringify(job.result, null, 2);
+              msg += `<br><pre style="background:#f0f0f0; padding:0.5rem; border-radius:4px; max-height:200px; overflow:auto;">${resultStr}</pre>`;
+            } catch (e) {
+              msg += `<br>Resultado: ${job.result}`;
+            }
+          }
+          statusDiv.innerHTML = msg;
+
+          if (job.status === 'completed') {
+            clearInterval(interval);
+            if (job.result && job.result.csv_download_url) {
+              statusDiv.innerHTML += `<br><a href="${job.result.csv_download_url}" class="btn" style="margin-top:0.5rem;">📥 Descargar CSV</a>`;
+            }
+            if (onComplete) onComplete(job);
+          } else if (job.status === 'failed') {
+            clearInterval(interval);
+            statusDiv.innerHTML += `<br>❌ Error: ${job.error}`;
+          }
+        })
+        .catch(err => {
+          statusDiv.innerHTML = `Error consultando trabajo: ${err}`;
+        });
+    }, 2000);
+  }
+
+  detectBtn.addEventListener('click', function() {
+    statusDiv.innerHTML = 'Iniciando detección GIS...';
+    fetch('/admin/api/detect-gis', { method: 'POST' })
+      .then(r => r.json())
+      .then(data => {
+        statusDiv.innerHTML = `Trabajo #${data.job_id} creado.`;
+        pollJob(data.job_id);
+      })
+      .catch(err => {
+        statusDiv.innerHTML = `Error al iniciar: ${err}`;
+      });
+  });
+
+  downloadBtn.addEventListener('click', function() {
+    statusDiv.innerHTML = 'Iniciando descarga GIS...';
+    fetch('/admin/api/download-gis', { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' })
+      .then(r => r.json())
+      .then(data => {
+        statusDiv.innerHTML = `Trabajo #${data.job_id} creado.`;
+        pollJob(data.job_id);
+      })
+      .catch(err => {
+        statusDiv.innerHTML = `Error al iniciar: ${err}`;
+      });
+  });
+
+});
+if (downloadSelectedGisBtn) {
+  downloadSelectedGisBtn.addEventListener('click', function() {
+    const project = '{{ selected_project }}';
+    const folder = '{{ folder_info.folder_id if folder_info else "" }}';
+
+    statusDiv.innerHTML = 'Iniciando descarga GIS de la carpeta seleccionada...';
+
+    fetch('/admin/api/download-selected-gis', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({project_guid: project, folder_id: folder})
+    })
+    .then(r => r.json())
+    .then(data => {
+      statusDiv.innerHTML = `Trabajo #${data.job_id} creado.`;
+      pollJob(data.job_id);
+    })
+    .catch(err => {
+      statusDiv.innerHTML = `Error: ${err}`;
+    });
+  });
+}
+</script>
+
+{% endblock %}

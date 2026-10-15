@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Administrador ACC · BIM/GIS</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img class="logo" src="{{ url_for('static', filename='logoANIN.png') }}" alt="ANIN">
+      <div class="brand-text">
+        <div class="app-title">Administrador ACC · BIM/GIS</div>
+        <div class="app-subtitle">Portafolio, modelos vigentes e inventario documental</div>
+      </div>
+    </div>
+    <nav class="topnav">
+      <a href="/admin/projects" class="nav-link">Proyectos</a>
+      <a href="/admin/" class="nav-link">Explorador ACC</a>
+      <a href="/admin/bim-stats" class="nav-link">Estadísticas BIM</a>
+    </nav>
+  </header>
+
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+
+  <!-- Mantener scroll del árbol -->
+  <script>
+  (function(){
+    const tree = document.querySelector('.tree');
+    if(!tree) return;
+
+    const key = "acc_tree_scroll:" + (new URLSearchParams(location.search).get("project") || "");
+    const saved = localStorage.getItem(key);
+    if(saved !== null) tree.scrollTop = parseInt(saved, 10) || 0;
+
+    tree.addEventListener('scroll', () => {
+      localStorage.setItem(key, String(tree.scrollTop));
+    });
+
+    document.addEventListener('click', (e) => {
+      const a = e.target.closest('a');
+      if(!a) return;
+      if(a.classList.contains('node') || a.classList.contains('twisty')){
+        localStorage.setItem(key, String(tree.scrollTop));
+      }
+    });
+
+    const active = document.querySelector('.node.active');
+    if(active){
+      const rect = active.getBoundingClientRect();
+      const treeRect = tree.getBoundingClientRect();
+      if(rect.top < treeRect.top || rect.bottom > treeRect.bottom){
+        active.scrollIntoView({block:"center"});
+      }
+    }
+  })();
+  </script>
+</body>
+</html>

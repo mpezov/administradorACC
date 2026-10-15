@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="detail-nav"><a href="/admin/projects">← Volver a proyectos</a><a href="/admin/?project={{ project.project_guid }}">Abrir árbol ACC</a></div>
+<div class="project-hero">
+  <div><div class="project-code">{{ project.cod_wvs or 'SIN CÓDIGO' }}</div><h1>{{ project.nombre_proyecto or project.acc_name }}</h1><div class="acc-name">{{ project.acc_name }}</div>
+    <div class="hero-meta">{% if project.cui %}<span>CUI {{ project.cui }}</span>{% endif %}{% if project.departamento %}<span>{{ project.departamento }}</span>{% endif %}{% if project.paquete %}<span>Paquete {{ project.paquete }}</span>{% endif %}{% if project.unidad_funcional %}<span>{{ project.unidad_funcional }}</span>{% endif %}</div>
+  </div>
+  <div class="project-guid-box"><span>ACC project GUID</span><code>{{ project.project_guid }}</code></div>
+</div>
+
+{% if viewer_notice %}<div class="viewer-message ok">Modelo gerencial actualizado. Se intentó verificar automáticamente el derivative de su versión vigente.</div>{% endif %}
+{% if viewer_error %}<div class="viewer-message error">{{ viewer_error }}</div>{% endif %}
+
+<div class="kpi-grid detail-kpis">
+  <div class="kpi-card"><span>Avance físico</span><strong>{{ project.a_fisico|pct }}</strong></div>
+  <div class="kpi-card"><span>Avance financiero</span><strong>{{ (project.a_financiero if project.a_financiero is not none else project.porcentaje_avance_financiero)|pct }}</strong></div>
+  <div class="kpi-card"><span>Avance diseño</span><strong>{{ project.a_diseno|pct }}</strong></div>
+  <div class="kpi-card"><span>Costo</span><strong>{{ project.costo if project.costo is not none else '—' }}</strong></div>
+  <div class="kpi-card"><span>Devengado</span><strong>{{ project.devengado_acumulado if project.devengado_acumulado is not none else '—' }}</strong></div>
+</div>
+<div class="inventory-strip"><div><strong>{{ project.folders_active }}</strong><span>Carpetas activas</span></div><div><strong>{{ project.items_active }}</strong><span>Archivos ACC activos</span></div><div><strong>{{ project.bim_files }}</strong><span>Modelos 3D/BIM</span></div><div><strong>{% if project.bim_size_bytes %}{{ project.bim_size_bytes|filesize }}{% else %}—{% endif %}</strong><span>Tamaño conocido</span></div></div>
+
+<section class="viewer-manager">
+  <div class="section-head">
+    <div>
+      <h2>Viewer Manager</h2>
+      <p>El modelo gerencial se fija por <code>acc_item_id</code>; ACC remoto y espejo local siguen la misma versión.</p>
+    </div>
+    {% if viewer_catalog_ready %}
+      <span class="viewer-schema ready">CATÁLOGO LISTO</span>
+    {% else %}
+      <span class="viewer-schema missing">MIGRACIÓN PENDIENTE</span>
+    {% endif %}
+  </div>
+
+  {% if mirror_notice %}
+    <div class="viewer-message ok">Espejo inicializado. Al abrirlo, los recursos solicitados por Viewer se guardarán en disco.</div>
+  {% endif %}
+
+  {% if not viewer_catalog_ready %}
+    <div class="viewer-empty">Ejecute <code>python .\migrar_viewer_manager.py</code> y recargue esta ficha.</div>
+
+  {% elif selected_model %}
+    <div class="selected-model-card">
+      <div class="selected-model-main">
+        <span class="selected-label">MODELO GERENCIAL</span>
+        <h3>{{ selected_model.item_name }}</h3>
+        <div class="selected-path">{{ selected_model.folder_path_cached or '—' }}</div>
+        <div class="selected-meta">
+          <span>Versión ACC <b>{{ selected_model.latest_version_id.split('?version=')[-1] if selected_model.latest_version_id and '?version=' in selected_model.latest_version_id else '—' }}</b></span>
+          <span>Derivative <b>{{ selected_model.derivative_format or '—' }}</b></span>
+          <span>Verificado <b>{{ selected_model.checked_at or '—' }}</b></span>
+        </div>
+      </div>
+
+      <div class="viewer-status-box status-{{ selected_model.viewer_status|lower }}">
+        <span>Estado Viewer</span>
+        <strong>{{ selected_model.viewer_status }}</strong>
+        {% if selected_model.remote_error %}<small>{{ selected_model.remote_error }}</small>{% endif %}
+      </div>
+    </div>
+
+    <div class="viewer-actions">
+      <form method="post" action="/admin/project/{{ project.project_guid }}/viewer/check">
+        <button class="btn-secondary" type="submit">Verificar derivative</button>
+      </form>
+
+      {% if selected_model.viewer_status in ['REMOTE_READY','LOCAL_READY'] and selected_model.derivative_urn %}
+        <a class="btn-viewer" href="/admin/project/{{ project.project_guid }}/viewer">Abrir visor ACC</a>
+      {% endif %}
+
+      {% if selected_model.remote_status == 'READY' %}
+        {% if selected_model.derivative_format == 'SVF' %}
+          {% if not config.MIRROR_ENABLED %}
+            <button class="btn-disabled" type="button" disabled title="Espejos desactivados en este servidor (MIRROR_ENABLED=false).">Espejo desactivado</button>
+          {% elif not mirror_schema_ready %}
+            <button class="btn-disabled" type="button" disabled>Instalar Mirror Cache v0.5</button>
+          {% elif mirror_state and mirror_state.acc_version_id == selected_model.latest_version_id %}
+            <a class="btn-mirror" href="/admin/project/{{ project.project_guid }}/viewer-mirror">Abrir espejo</a>
+          {% else %}
+            <form method="post" action="/admin/project/{{ project.project_guid }}/mirror/prepare">
+              <button class="btn-mirror" type="submit">Preparar espejo SVF</button>
+            </form>
+          {% endif %}
+        {% elif selected_model.derivative_format == 'SVF2' %}
+          <button class="btn-disabled" type="button" disabled title="SVF2 requiere el proxy streaming/WebSocket completo. Se mantiene el visor ACC remoto.">SVF2 · remoto</button>
+        {% else %}
+          <button class="btn-disabled" type="button" disabled>Formato derivative por confirmar</button>
+        {% endif %}
+      {% endif %}
+    </div>
+
+    {% if selected_model.derivative_format == 'SVF' %}
+      <div class="mirror-panel">
+        <div class="mirror-panel-head">
+          <div>
+            <strong>Espejo local SVF</strong>
+            <span>Proxy-cache versionado</span>
+          </div>
+          {% if mirror_state and mirror_state.acc_version_id == selected_model.latest_version_id %}
+            <span class="mirror-status warming">CACHEANDO</span>
+          {% elif mirror_schema_ready %}
+            <span class="mirror-status empty">NO PREPARADO</span>
+          {% else %}
+            <span class="mirror-status missing">MIGRACIÓN PENDIENTE</span>
+          {% endif %}
+        </div>
+
+        {% if mirror_state and mirror_state.acc_version_id == selected_model.latest_version_id %}
+          <div class="mirror-kpis">
+            <div><b>{{ mirror_state.cached_files or 0 }}</b><span>Recursos cacheados</span></div>
+            <div><b>{{ (mirror_state.cached_bytes or 0)|filesize }}</b><span>Tamaño cacheado</span></div>
+            <div><b>v{{ mirror_state.version_number if mirror_state.version_number is not none else '—' }}</b><span>Versión espejo</span></div>
+          </div>
+          <div class="mirror-path"><b>Ruta:</b> <code>{{ mirror_state.local_root }}</code></div>
+          <div class="mirror-note">El espejo crece al navegar por el modelo. En v0.5 todavía no se declara “offline completo”; solo los recursos ya cacheados son locales.</div>
+        {% elif mirror_schema_ready %}
+          <div class="mirror-note">Aún no existe carpeta espejo para la versión vigente. “Preparar espejo SVF” crea la estructura y guarda el manifest antes de abrir el visor cacheado.</div>
+        {% else %}
+          <div class="mirror-note">Ejecute <code>python .\migrar_mirror_v0_5.py</code> para habilitar el registro de recursos locales.</div>
+        {% endif %}
+      </div>
+    {% elif selected_model.derivative_format == 'SVF2' %}
+      <div class="mirror-panel">
+        <div class="mirror-panel-head">
+          <div><strong>Espejo local</strong><span>Derivative SVF2</span></div>
+          <span class="mirror-status remote">REMOTO</span>
+        </div>
+        <div class="mirror-note">SVF2 continúa por streaming ACC en esta versión. No se marca como espejo local porque el proxy completo requiere soporte WebSocket además de HTTP.</div>
+      </div>
+    {% endif %}
+
+    <details class="viewer-tech">
+      <summary>Datos técnicos</summary>
+      <div><b>ACC item:</b> <code>{{ selected_model.acc_item_id }}</code></div>
+      <div><b>Version:</b> <code>{{ selected_model.latest_version_id or '—' }}</code></div>
+      <div><b>Derivative:</b> <code>{{ selected_model.derivative_urn or '—' }}</code></div>
+      <div><b>Viewable GUID:</b> <code>{{ selected_model.default_viewable_guid or '—' }}</code></div>
+      {% if mirror_state %}
+        <div><b>Local version ID:</b> <code>{{ mirror_state.id }}</code></div>
+      {% endif %}
+    </details>
+
+  {% else %}
+    <div class="viewer-empty">Todavía no se ha seleccionado un modelo gerencial. Elija un candidato NWD o seleccione manualmente un NWD de la tabla.</div>
+  {% endif %}
+</section>
+
+<section class="candidate-section">
+{% if project.nwd_count == 0 %}
+  <div class="section-head"><div><h2>Modelo federado</h2><p>Este proyecto ACC no tiene archivos NWD activos registrados.</p></div><span class="candidate-count">SIN NWD</span></div>
+  <div class="empty-card">No hay un modelo Navisworks NWD que pueda evaluarse como federado en este proyecto.</div>
+{% else %}
+  <div class="section-head"><div><h2>Candidatos a modelo federado</h2><p>Solo NWD activos; el ranking recomienda, nunca selecciona automáticamente.</p></div><span class="candidate-count">{{ candidates|length }} de {{ project.nwd_count }} NWD</span></div>
+  {% if candidates %}<div class="candidate-grid">
+  {% for c in candidates %}<article class="candidate-card confidence-{{ c.confidence|lower|replace(' ','-') }}">
+    <div class="candidate-top"><div><span class="score">{{ c.candidate_score }}</span><span class="confidence">{{ c.confidence }}</span></div><span class="stage stage-{{ c.stage|lower }}">{{ c.stage }}</span></div>
+    <h3>{{ c.item_name }}</h3><div class="candidate-tags">{% for reason in c.reasons %}<span class="reason">{{ reason }}</span>{% endfor %}{% for warning in c.warnings %}<span class="warning">{{ warning }}</span>{% endfor %}</div>
+    <div class="candidate-path">{{ c.folder_path_cached or 'Ruta no disponible' }}</div><div class="candidate-meta"><span>Versión <b>{{ c.latest_version_id.split('?version=')[-1] if c.latest_version_id and '?version=' in c.latest_version_id else (c.version_count or '—') }}</b></span><span>Modificado <b>{{ c.last_modified or '—' }}</b></span>{% if c.same_name_count and c.same_name_count > 1 %}<span>Ubicaciones <b>{{ c.same_name_count }}</b></span>{% endif %}</div>
+    {% if viewer_catalog_ready %}<form class="candidate-select" method="post" action="/admin/project/{{ project.project_guid }}/viewer/select"><input type="hidden" name="item_id" value="{{ c.item_id }}"><button class="btn-select-model" type="submit">{% if selected_model and selected_model.acc_item_id == c.item_id %}Seleccionado{% else %}Seleccionar como gerencial{% endif %}</button></form>{% endif %}
+    <details><summary>Identificador ACC</summary><code>{{ c.item_id }}</code><code>{{ c.latest_version_id or 'sin latest_version_id' }}</code></details>
+  </article>{% endfor %}
+  </div>{% else %}<div class="empty-card">Hay {{ project.nwd_count }} NWD activo(s), pero requieren revisión manual. Puede seleccionar uno en la tabla inferior.</div>{% endif %}
+{% endif %}
+</section>
+
+<div class="section-head models-head"><div><h2>Modelos 3D/BIM activos en ACC</h2><p>NWD, RVT, IFC y NWC. DWG/DGN permanecen en el Explorador ACC.</p></div></div>
+<div class="bim-type-row">{% for s in ext_stats %}<div class="type-chip"><b>{{ s.ext|upper }}</b> {{ s.total }}{% if s.size_bytes %} · {{ s.size_bytes|filesize }}{% endif %}</div>{% endfor %}</div>
+<div class="table-container wide"><table class="stats-table bim-table"><thead><tr><th>Tipo</th><th>Etapa</th><th>Disciplina</th><th>Archivo activo</th><th>Carpeta ACC</th><th>Ver.</th><th>Última modificación</th><th>Tamaño</th><th>Acción</th></tr></thead><tbody>
+{% for i in bim_items %}<tr><td><span class="file-ext">{{ i.ext|upper }}</span></td><td><span class="stage stage-{{ i.stage|lower }}">{{ i.stage }}</span></td><td>{{ i.discipline }}</td><td><strong>{{ i.item_name }}</strong>{% if i.same_name_count and i.same_name_count > 1 %}<div class="small-muted">{{ i.same_name_count }} items activos con el mismo nombre</div>{% endif %}<div class="small-mono">{{ i.item_id }}</div></td><td class="path-cell">{{ i.folder_path_cached or '—' }}</td><td>{{ i.latest_version_id.split('?version=')[-1] if i.latest_version_id and '?version=' in i.latest_version_id else (i.version_count or '—') }}</td><td>{{ i.last_modified or '—' }}</td><td>{% if i.size_bytes %}{{ i.size_bytes|filesize }}{% else %}—{% endif %}</td><td>{% if i.ext == 'nwd' and viewer_catalog_ready %}{% if selected_model and selected_model.acc_item_id == i.item_id %}<span class="status-pill ok">GERENCIAL</span>{% else %}<form method="post" action="/admin/project/{{ project.project_guid }}/viewer/select"><input type="hidden" name="item_id" value="{{ i.item_id }}"><button class="table-select" type="submit">Seleccionar</button></form>{% endif %}{% else %}<span class="status-pill ok">{{ i.current_status }}</span>{% endif %}</td></tr>
+{% else %}<tr><td colspan="9">No hay modelos 3D/BIM activos registrados.</td></tr>{% endfor %}
+</tbody></table></div>
+
+<div class="two-cols"><section class="panel-simple"><h3>Carpetas con modelos 3D/BIM</h3><table class="compact-table"><thead><tr><th>Ruta</th><th>Modelos</th></tr></thead><tbody>{% for f in folder_stats %}<tr><td>{{ f.folder_path }}</td><td>{{ f.bim_files }}</td></tr>{% else %}<tr><td colspan="2">Sin datos</td></tr>{% endfor %}</tbody></table></section><section class="panel-simple"><h3>Flujo del visor</h3><div class="decision-flow"><span>NWD</span><b>→</b><span>acc_item_id</span><b>→</b><span>Derivative ACC</span><b>→</b><span>Viewer</span></div><p>El espejo local se versionará aparte y nunca sustituirá el archivo fuente de ACC.</p></section></div>
+{% endblock %}
