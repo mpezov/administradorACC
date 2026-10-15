@@ -4,6 +4,9 @@ python-dotenv==1.0.0
 requests==2.31.0
 SQLAlchemy==2.0.23
 APScheduler==3.10.4
+PyMuPDF==1.26.7
+pikepdf==10.3.0
+PyJWT==2.10.1
 waitress==3.0.2
 gunicorn==23.0.0; sys_platform != "win32"
 # geopandas y shapely no los usa el código actual; instalar a mano si se necesitan.
