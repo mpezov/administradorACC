@@ -18,7 +18,8 @@ def init_app(app):
     db_port = str(db_port)
 
     db_url = f"postgresql+psycopg2://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
-    engine = create_engine(db_url, future=True)
+    # pre_ping/recycle: la base en la nube corta conexiones inactivas.
+    engine = create_engine(db_url, future=True, pool_pre_ping=True, pool_recycle=300)
     print(f"✅ Engine creado: {engine}")
 
     # Crear tablas necesarias si no existen
