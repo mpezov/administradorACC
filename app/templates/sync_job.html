@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+{% set running = job.status == 'running' %}
+{% if running %}<meta http-equiv="refresh" content="3">{% endif %}
+<div class="detail-nav"><a href="/admin/project/{{ result.project_guid }}">← Volver al proyecto</a></div>
+<section class="viewer-manager">
+  <div class="section-head">
+    <div>
+      <h2>Buscar nuevos modelos · {{ result.project_code }}</h2>
+      <p>Revisa las carpetas del proyecto en ACC, registra los NWD nuevos y actualiza las versiones de los ya registrados.</p>
+    </div>
+    {% if running %}<span class="viewer-schema missing">EN CURSO</span>
+    {% elif job.status == 'completed' %}<span class="viewer-schema ready">TERMINADO</span>
+    {% else %}<span class="viewer-schema missing">CON ERROR</span>{% endif %}
+  </div>
+
+  {% if result.stats %}
+  <div class="inventory-strip">
+    <div><strong>{{ result.stats.nwd_found }}</strong><span>NWD encontrados</span></div>
+    <div><strong>{{ result.stats.new_candidates }}</strong><span>Nuevos</span></div>
+    <div><strong>{{ result.stats.registered }}</strong><span>Ya registrados</span></div>
+    <div><strong>{{ result.stats.folders_scanned }}</strong><span>Carpetas revisadas</span></div>
+  </div>
+  {% endif %}
+
+  {% if job.status == 'completed' %}
+    <div class="viewer-message ok">Listo. Los modelos nuevos ya aparecen en la lista de federados del proyecto.
+      <a href="/admin/project/{{ result.project_guid }}">Ir a elegir el federado</a></div>
+  {% elif job.status == 'failed' %}
+    <div class="viewer-message error">{{ job.error }}</div>
+  {% else %}
+    <div class="viewer-message ok">Buscando... esta página se actualiza sola.</div>
+  {% endif %}
+
+  <pre class="sync-log" style="max-height:60vh;overflow:auto;background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;font-size:12px;white-space:pre-wrap">{{ (result.log or [])|join('\n') }}</pre>
+</section>
+{% endblock %}

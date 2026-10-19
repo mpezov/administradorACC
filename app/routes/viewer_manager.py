@@ -12,6 +12,7 @@ from flask import (
 
 from ..utils.aps_viewer import public_viewer_token, resolve_acc_derivative
 from ..utils.local_mirror import prepare_local_mirror, get_cached_or_fetch
+from ..utils import model_sync
 from ..utils.viewer_db import (
     schema_ready,
     mirror_schema_ready,
@@ -316,3 +317,27 @@ def viewer_state(project_guid):
         "model": selected,
         "mirror": mirror,
     })
+
+
+@viewer_bp.post("/project/<project_guid>/models/sync")
+def sync_models(project_guid):
+    """Botón "Buscar nuevos modelos": lanza el discovery NWD del proyecto."""
+    try:
+        job_id = model_sync.start(project_guid)
+    except Exception as exc:
+        return redirect(
+            url_for(
+                "portfolio.project_detail",
+                project_guid=project_guid,
+                viewer_error=f"No se pudo iniciar la búsqueda: {exc}",
+            )
+        )
+    return redirect(url_for("viewer_manager.sync_job", job_id=job_id))
+
+
+@viewer_bp.get("/jobs/models/<int:job_id>")
+def sync_job(job_id):
+    job = model_sync.get_job(job_id)
+    if not job:
+        return "Proceso no encontrado.", 404
+    return render_template("sync_job.html", job=job, result=job.get("result") or {})

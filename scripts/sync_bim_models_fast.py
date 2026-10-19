@@ -637,14 +637,30 @@ def discover_nwds_recursive(conn, project_code: str, project_guid_override: Opti
     print("Modo             :", "APPLY" if apply else "CHECK")
     print("=" * 96)
 
+    # Lectura de carpetas en paralelo (el cliente respeta ACC_API_RATE_LIMIT).
+    from concurrent.futures import ThreadPoolExecutor
+    workers = max(1, int(os.getenv("ACC_MAX_WORKERS", "5")))
+    pool = ThreadPoolExecutor(max_workers=workers)
+    pending: Dict[str, Any] = {}
+
+    def prefetch() -> None:
+        for fid, _ in queue[: workers * 2]:
+            if fid not in pending and fid not in seen_folders:
+                pending[fid] = pool.submit(get_folder_contents, aps_pid, fid)
+
     while queue:
         folder_id, parts = queue.pop(0)
         if folder_id in seen_folders:
+            pending.pop(folder_id, None)
             continue
         seen_folders.add(folder_id)
+        if len(seen_folders) % 100 == 0:
+            print(f"[AVANCE] {len(seen_folders)} carpetas revisadas, {len(candidates)} NWD encontrados")
         folder_path = "/" + "/".join(parts)
+        fut = pending.pop(folder_id, None) or pool.submit(get_folder_contents, aps_pid, folder_id)
+        prefetch()
         try:
-            contents = get_folder_contents(aps_pid, folder_id)
+            contents = fut.result()
         except Exception as e:
             folder_errors += 1
             print(f"[CARPETA ERROR] {folder_path}: {e}")
@@ -702,6 +718,7 @@ def discover_nwds_recursive(conn, project_code: str, project_guid_override: Opti
                 queue.clear()
                 break
 
+    pool.shutdown(wait=False, cancel_futures=True)
     elapsed = time.perf_counter() - t0
     new_count = sum(1 for c in candidates if c["catalog_status"] == "NEW_CANDIDATE")
     registered_count = len(candidates) - new_count

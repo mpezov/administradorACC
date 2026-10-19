@@ -33,6 +33,10 @@
     {% endif %}
   </div>
 
+  <form method="post" action="/admin/project/{{ project.project_guid }}/models/sync" style="margin:0 0 12px">
+    <button class="btn-secondary" type="submit" title="Revisa ACC, agrega los NWD nuevos a la lista y actualiza versiones">Buscar nuevos modelos</button>
+  </form>
+
   {% if mirror_notice %}
     <div class="viewer-message ok">Espejo inicializado. Al abrirlo, los recursos solicitados por Viewer se guardarán en disco.</div>
   {% endif %}
