@@ -49,31 +49,74 @@ def _profile_for(project_type):
     }.get(project_type, "GENERIC_MANAGER")
 
 
+def ensure_bim_project(conn, project_guid):
+    """Devuelve la fila de bim_projects del proyecto ACC; la crea si no existe."""
+    project = conn.execute(text("""
+        SELECT p.id_guid, p.cod_wvs, p.name, pa.cui, pa.nombre_proyecto
+        FROM public.acc_projects p
+        LEFT JOIN LATERAL (
+            SELECT x.cui, x.nombre_proyecto
+            FROM public.proyectos_avance x
+            WHERE NULLIF(trim(p.cod_wvs::text),'') IS NOT NULL
+              AND trim(x.wvs::text)=trim(p.cod_wvs::text)
+            ORDER BY x.fecha_carga DESC NULLS LAST,
+                     x.anio_reporte DESC NULLS LAST,
+                     x.mes_reporte DESC NULLS LAST,
+                     x.id DESC
+            LIMIT 1
+        ) pa ON true
+        WHERE p.id_guid=:pg
+    """), {"pg": project_guid}).mappings().first()
+    if not project:
+        raise ValueError("Proyecto ACC no encontrado.")
+    if re.search(DEFAULT_PROJECT_EXCLUDE_REGEX, (project["name"] or "").lower()):
+        raise ValueError("Este proyecto está excluido del análisis gerencial.")
+
+    bp = conn.execute(text("""
+        SELECT * FROM public.bim_projects WHERE acc_project_guid=:pg
+    """), {"pg": project_guid}).mappings().first()
+
+    if not bp:
+        base_code = (str(project["cod_wvs"] or "").strip() or f"ACC-{project_guid[:8]}").upper()
+        code = base_code
+        local_key = f"P{base_code}"
+        conflict = conn.execute(text("""
+            SELECT id FROM public.bim_projects
+            WHERE project_code=:code OR local_project_key=:local_key
+            LIMIT 1
+        """), {"code": code, "local_key": local_key}).first()
+        if conflict:
+            suffix = project_guid[:8].upper()
+            code = f"{base_code}-{suffix}"
+            local_key = f"P{base_code}-{suffix}"
+
+        project_type = _infer_type(project["nombre_proyecto"] or project["name"])
+        profile = _profile_for(project_type)
+        bp = conn.execute(text("""
+            INSERT INTO public.bim_projects(
+                project_code,cui,wvs,acc_project_guid,project_type,
+                viewer_enabled,managerial_profile,local_project_key,metadata
+            )
+            VALUES(:code,:cui,:wvs,:pg,:project_type,true,:profile,:local_key,'{}'::jsonb)
+            RETURNING *
+        """), {
+            "code": code,
+            "cui": str(project["cui"]) if project["cui"] is not None else None,
+            "wvs": str(project["cod_wvs"]) if project["cod_wvs"] is not None else None,
+            "pg": project_guid,
+            "project_type": project_type,
+            "profile": profile,
+            "local_key": local_key,
+        }).mappings().first()
+    return bp
+
+
 def select_managerial_model(project_guid, item_id):
     if not schema_ready():
         raise RuntimeError("CATALOGO_BIM_NO_INSTALADO")
 
     with models.engine.begin() as conn:
-        project = conn.execute(text("""
-            SELECT p.id_guid, p.cod_wvs, p.name, pa.cui, pa.nombre_proyecto
-            FROM public.acc_projects p
-            LEFT JOIN LATERAL (
-                SELECT x.cui, x.nombre_proyecto
-                FROM public.proyectos_avance x
-                WHERE NULLIF(trim(p.cod_wvs::text),'') IS NOT NULL
-                  AND trim(x.wvs::text)=trim(p.cod_wvs::text)
-                ORDER BY x.fecha_carga DESC NULLS LAST,
-                         x.anio_reporte DESC NULLS LAST,
-                         x.mes_reporte DESC NULLS LAST,
-                         x.id DESC
-                LIMIT 1
-            ) pa ON true
-            WHERE p.id_guid=:pg
-        """), {"pg": project_guid}).mappings().first()
-        if not project:
-            raise ValueError("Proyecto ACC no encontrado.")
-        if re.search(DEFAULT_PROJECT_EXCLUDE_REGEX, (project["name"] or "").lower()):
-            raise ValueError("Este proyecto está excluido del análisis gerencial.")
+        bp = ensure_bim_project(conn, project_guid)
 
         item = conn.execute(text("""
             SELECT item_id, item_name, ext, folder_id, folder_path_cached,
@@ -86,43 +129,6 @@ def select_managerial_model(project_guid, item_id):
         """), {"pg": project_guid, "item_id": item_id}).mappings().first()
         if not item:
             raise ValueError("El item no es un NWD activo de este proyecto.")
-
-        bp = conn.execute(text("""
-            SELECT * FROM public.bim_projects WHERE acc_project_guid=:pg
-        """), {"pg": project_guid}).mappings().first()
-
-        if not bp:
-            base_code = (str(project["cod_wvs"] or "").strip() or f"ACC-{project_guid[:8]}").upper()
-            code = base_code
-            local_key = f"P{base_code}"
-            conflict = conn.execute(text("""
-                SELECT id FROM public.bim_projects
-                WHERE project_code=:code OR local_project_key=:local_key
-                LIMIT 1
-            """), {"code": code, "local_key": local_key}).first()
-            if conflict:
-                suffix = project_guid[:8].upper()
-                code = f"{base_code}-{suffix}"
-                local_key = f"P{base_code}-{suffix}"
-
-            project_type = _infer_type(project["nombre_proyecto"] or project["name"])
-            profile = _profile_for(project_type)
-            bp = conn.execute(text("""
-                INSERT INTO public.bim_projects(
-                    project_code,cui,wvs,acc_project_guid,project_type,
-                    viewer_enabled,managerial_profile,local_project_key,metadata
-                )
-                VALUES(:code,:cui,:wvs,:pg,:project_type,true,:profile,:local_key,'{}'::jsonb)
-                RETURNING *
-            """), {
-                "code": code,
-                "cui": str(project["cui"]) if project["cui"] is not None else None,
-                "wvs": str(project["cod_wvs"]) if project["cod_wvs"] is not None else None,
-                "pg": project_guid,
-                "project_type": project_type,
-                "profile": profile,
-                "local_key": local_key,
-            }).mappings().first()
 
         conn.execute(text("""
             UPDATE public.bim_project_models SET is_default=false

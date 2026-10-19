@@ -27,6 +27,8 @@ from .. import models
 ROOT = Path(__file__).resolve().parents[2]
 JOB_TYPE = "sync_models"
 MAX_LOG_LINES = 400
+# Sin señal de vida en este tiempo, el job se da por interrumpido (p.ej. reinicio del servidor).
+STALE_SECONDS = 120
 
 
 def _project_code(project_guid):
@@ -51,10 +53,13 @@ def running_job(project_guid):
                 WHERE job_type=:t AND status='running'
                   AND result->>'project_guid'=:g
                   AND created_at > now() - interval '2 hours'
+                  AND (created_at > now() - make_interval(secs => :stale)
+                       OR COALESCE((result->>'heartbeat')::float, 0)
+                          > extract(epoch FROM now()) - :stale)
                 ORDER BY id DESC LIMIT 1
                 """
             ),
-            {"t": JOB_TYPE, "g": project_guid},
+            {"t": JOB_TYPE, "g": project_guid, "stale": STALE_SECONDS},
         ).first()
     return row[0] if row else None
 
@@ -65,7 +70,20 @@ def get_job(job_id):
             text("SELECT * FROM acc_jobs WHERE id=:id AND job_type=:t"),
             {"id": job_id, "t": JOB_TYPE},
         ).mappings().first()
-    return dict(job) if job else None
+    if not job:
+        return None
+    job = dict(job)
+    beat = (job.get("result") or {}).get("heartbeat") or 0
+    started = job.get("started_at") or job.get("created_at")
+    if (
+        job["status"] == "running"
+        and time.time() - beat > STALE_SECONDS
+        and (not started or time.time() - started.timestamp() > STALE_SECONDS)
+    ):
+        msg = "El proceso se interrumpió (el servidor se reinició). Vuelve a pulsar \"Buscar nuevos modelos\"."
+        _save(job_id, status="failed", error=msg, finished=True)
+        job.update(status="failed", error=msg)
+    return job
 
 
 def _save(job_id, status=None, result=None, error=None, finished=False):
@@ -91,6 +109,10 @@ def start(project_guid):
     if existing:
         return existing
     code = _project_code(project_guid)
+    # El discovery exige que el proyecto exista en bim_projects; lo registra si falta.
+    from .viewer_db import ensure_bim_project
+    with models.engine.begin() as conn:
+        ensure_bim_project(conn, project_guid)
     result = {"project_guid": project_guid, "project_code": code, "log": []}
     with models.engine.begin() as conn:
         job_id = conn.execute(
@@ -118,6 +140,7 @@ def _run(job_id, result):
         cmd = [
             sys.executable, "-u", str(ROOT / "run_sync_bim_fast.py"),
             "--discover", "--project-code", result["project_code"],
+            "--project-guid", result["project_guid"],
             "--apply", "--json", str(report),
         ]
         add("Buscando archivos NWD en ACC (puede tardar varios minutos)...")
@@ -130,6 +153,7 @@ def _run(job_id, result):
             # Guarda el avance cada 3 s aunque no lleguen líneas nuevas.
             while proc.poll() is None:
                 time.sleep(3)
+                result["heartbeat"] = time.time()
                 try:
                     _save(job_id, result=result)
                 except Exception:
