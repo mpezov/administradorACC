@@ -193,7 +193,7 @@ def _run(job_id, result):
 
 
 def _upsert_inventory(project_guid, candidates):
-    """Registra los NWD encontrados en acc_folders/acc_items (fuente de la lista de federados)."""
+    """Registra los federados encontrados (NWD o IWM) en acc_folders/acc_items (fuente de la lista de federados)."""
     n = 0
     with models.engine.begin() as conn:
         for c in candidates:
@@ -217,7 +217,7 @@ def _upsert_inventory(project_guid, candidates):
                     INSERT INTO acc_items (item_id, project_guid, folder_id, item_name, ext,
                                            version_count, latest_version_id, last_modified,
                                            folder_path_cached, updated_at, is_active)
-                    VALUES (:i, :g, :f, :n, 'nwd', :vc, :lv, CAST(:lm AS timestamptz), :fp, now(), true)
+                    VALUES (:i, :g, :f, :n, :ext, :vc, :lv, CAST(:lm AS timestamptz), :fp, now(), true)
                     ON CONFLICT (item_id) DO UPDATE SET
                         folder_id=EXCLUDED.folder_id,
                         item_name=EXCLUDED.item_name,
@@ -231,6 +231,7 @@ def _upsert_inventory(project_guid, candidates):
                 ),
                 {
                     "i": item_id, "g": project_guid, "f": folder_id, "n": c.get("name") or "",
+                    "ext": (c.get("name") or "x.nwd").rsplit(".", 1)[-1].lower(),
                     "vc": _int(remote.get("version_number")), "lv": remote.get("version_id"),
                     "lm": remote.get("last_modified"), "fp": c.get("folder_path"),
                 },

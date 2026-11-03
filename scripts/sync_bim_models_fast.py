@@ -5,7 +5,8 @@ Sincronización rápida v0.4: catálogo persistente, discovery NWD y Viewer Mana
 Objetivo:
 - NO recorrer carpetas ACC.
 - Leer únicamente modelos registrados en public.bim_project_models.
-- Considerar solo archivos .nwd.
+- Considerar solo modelos federados: .nwd (Navisworks) e .iwm (InfraWorks);
+  la lista se puede cambiar con FEDERATED_EXTENSIONS (por defecto "nwd,iwm").
 - Consultar directamente la última versión de cada item_id.
 - Por defecto: modo diagnóstico (sin escrituras).
 - Con --apply: actualizar únicamente columnas reconocidas de la tabla de modelos
@@ -50,6 +51,22 @@ PG = dict(
     user=os.getenv("POSTGRES_USER"),
     password=os.getenv("POSTGRES_PASSWORD"),
 )
+
+# Extensiones que se aceptan como modelo federado (el APS Viewer abre ambas).
+FEDERATED_EXTENSIONS = tuple(
+    e.strip().lower().lstrip(".")
+    for e in os.getenv("FEDERATED_EXTENSIONS", "nwd,iwm").split(",")
+    if e.strip()
+)
+
+
+def federated_ext(name: Any) -> Optional[str]:
+    """Extensión federada del archivo ("nwd", "iwm") o None si no lo es."""
+    if not isinstance(name, str):
+        return None
+    ext = name.strip().lower().rsplit(".", 1)[-1] if "." in name else ""
+    return ext if ext in FEDERATED_EXTENSIONS else None
+
 
 MODEL_TABLE = "bim_project_models"
 REMOTE_TABLE = "bim_remote_versions"
@@ -110,10 +127,10 @@ def pick_value(row: Dict[str, Any], key: str) -> Any:
 
 
 def looks_nwd(name: Any, fmt: Any = None) -> bool:
-    by_name = isinstance(name, str) and name.strip().lower().endswith(".nwd")
+    """True si el archivo es un federado admitido (NWD o IWM), por nombre o por formato."""
+    by_name = federated_ext(name) is not None
     if isinstance(fmt, str):
-        f = fmt.strip().lower().lstrip(".")
-        by_format = f == "nwd"
+        by_format = fmt.strip().lower().lstrip(".") in FEDERATED_EXTENSIONS
     else:
         by_format = False
     return by_name or by_format
@@ -133,7 +150,7 @@ def get_models(conn, limit: Optional[int]) -> Tuple[List[Dict[str, Any]], List[s
     if active_col:
         rows = [r for r in rows if r.get(active_col) is not False]
 
-    # Solo federados NWD. Se usa el nombre cacheado y, como respaldo, format='nwd'.
+    # Solo federados (NWD o IWM). Se usa el nombre cacheado y, como respaldo, el formato.
     name_col = first_col(cols, "name")
     format_col = first_col(cols, "format")
     if name_col or format_col:
@@ -513,7 +530,7 @@ def refresh_existing_model(conn, row: Dict[str, Any], cols: Sequence[str], cand:
         "source_filename_cache": cand["name"],
         "acc_folder_id_cache": cand["folder_id"],
         "acc_folder_path_cache": cand["folder_path"],
-        "format": "nwd",
+        "format": federated_ext(cand["name"]) or "nwd",
         "enabled": True,
     }
     sets, params = [], []
@@ -678,7 +695,7 @@ def discover_nwds_recursive(conn, project_code: str, project_guid_override: Opti
 
             items_seen += 1
             name = attrs.get("displayName") or attrs.get("name") or ""
-            if not (isinstance(name, str) and name.lower().endswith(".nwd")):
+            if federated_ext(name) is None:
                 continue
 
             item_id = elem.get("id")
@@ -1010,7 +1027,7 @@ def promote_candidate(conn, project_code: str, item_id: str, apply: bool, model_
     put("source_filename_cache", cand.get("filename"))
     put("acc_folder_id_cache", cand.get("acc_folder_id"))
     put("acc_folder_path_cache", cand.get("acc_folder_path"))
-    put("format", "nwd")
+    put("format", federated_ext(cand.get("filename")) or "nwd")
     put("is_default", bool(set_default))
     put("enabled", True)
     # Nunca imponer un valor fijo: respetar el esquema real de cada instalación.
@@ -1060,7 +1077,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--model-code", default=None, help="Código de modelo requerido al promover con --apply")
     ap.add_argument("--model-role", default="federated", help="Rol al promover; por defecto federated")
     ap.add_argument("--set-default", action="store_true", help="Marca is_default=true al promover; no desmarca otros automáticamente")
-    ap.add_argument("--scan-folders", action="store_true", help="Recorre carpetas ACC recursivamente buscando solo .nwd")
+    ap.add_argument("--scan-folders", action="store_true", help="Recorre carpetas ACC recursivamente buscando federados (.nwd, .iwm)")
     ap.add_argument("--project-code", default=None, help="Código/WVS del proyecto, por ejemplo 100021")
     ap.add_argument("--project-guid", default=None, help="GUID ACC opcional; respaldo si el catálogo no lo expone")
     ap.add_argument("--folder-urn", default=None, help="URN de carpeta ACC desde la cual iniciar el recorrido; si se omite, recorre raíces")

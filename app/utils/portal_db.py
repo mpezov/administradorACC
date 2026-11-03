@@ -1,7 +1,16 @@
+import os
+
 from sqlalchemy import text
 from .. import models
 
-DEFAULT_BIM_EXTENSIONS = ("nwd", "nwc", "rvt", "ifc")
+DEFAULT_BIM_EXTENSIONS = ("nwd", "iwm", "nwc", "rvt", "ifc")
+# Modelos que pueden ser federado del visor: Navisworks (.nwd) e InfraWorks (.iwm).
+# Se pueden cambiar con FEDERATED_EXTENSIONS (por ejemplo "nwd,iwm").
+FEDERATED_EXTENSIONS = [
+    e.strip().lower().lstrip(".")
+    for e in os.getenv("FEDERATED_EXTENSIONS", "nwd,iwm").split(",")
+    if e.strip()
+]
 CAD_EXTENSIONS = ("dwg", "dgn", "dxf")
 
 # Proyectos fuera del análisis gerencial por defecto.
@@ -52,7 +61,7 @@ def list_project_portfolio(q="", only_bim=None, bim_exts=DEFAULT_BIM_EXTENSIONS,
                COUNT(*) FILTER (WHERE COALESCE(is_active,true)) AS items_active,
                COUNT(*) FILTER (WHERE COALESCE(is_active,true)
                                 AND lower(COALESCE(ext,'')) = ANY(:bim_exts)) AS bim_files,
-               COUNT(*) FILTER (WHERE COALESCE(is_active,true) AND lower(COALESCE(ext,''))='nwd') AS nwd_count,
+               COUNT(*) FILTER (WHERE COALESCE(is_active,true) AND lower(COALESCE(ext,''))=ANY(:fed_exts)) AS nwd_count,
                COUNT(*) FILTER (WHERE COALESCE(is_active,true) AND lower(COALESCE(ext,''))='rvt') AS rvt_count,
                COUNT(*) FILTER (WHERE COALESCE(is_active,true) AND lower(COALESCE(ext,''))='ifc') AS ifc_count,
                COUNT(*) FILTER (WHERE COALESCE(is_active,true) AND lower(COALESCE(ext,''))='nwc') AS nwc_count,
@@ -107,7 +116,7 @@ def list_project_portfolio(q="", only_bim=None, bim_exts=DEFAULT_BIM_EXTENSIONS,
              COALESCE(pa.nombre_proyecto,p.name), p.id_guid
     """
     with models.engine.begin() as conn:
-        rows = conn.execute(text(sql), {"q": (q or "").strip(), "only_bim": only_bim, "bim_exts": exts, "include_excluded": bool(include_excluded), "exclude_regex": exclude_regex}).mappings().all()
+        rows = conn.execute(text(sql), {"q": (q or "").strip(), "only_bim": only_bim, "bim_exts": exts, "fed_exts": FEDERATED_EXTENSIONS, "include_excluded": bool(include_excluded), "exclude_regex": exclude_regex}).mappings().all()
     return [dict(r) for r in rows]
 
 
@@ -120,7 +129,7 @@ def get_project_overview(project_guid, bim_exts=DEFAULT_BIM_EXTENSIONS):
     ), its AS (
       SELECT COUNT(*) FILTER (WHERE COALESCE(is_active,true)) AS items_active,
              COUNT(*) FILTER (WHERE COALESCE(is_active,true) AND lower(COALESCE(ext,''))=ANY(:bim_exts)) AS bim_files,
-             COUNT(*) FILTER (WHERE COALESCE(is_active,true) AND lower(COALESCE(ext,''))='nwd') AS nwd_count,
+             COUNT(*) FILTER (WHERE COALESCE(is_active,true) AND lower(COALESCE(ext,''))=ANY(:fed_exts)) AS nwd_count,
              COUNT(*) FILTER (WHERE COALESCE(is_active,true) AND lower(COALESCE(ext,''))='rvt') AS rvt_count,
              COUNT(*) FILTER (WHERE COALESCE(is_active,true) AND lower(COALESCE(ext,''))='ifc') AS ifc_count,
              COUNT(*) FILTER (WHERE COALESCE(is_active,true) AND lower(COALESCE(ext,''))='nwc') AS nwc_count,
@@ -155,7 +164,7 @@ def get_project_overview(project_guid, bim_exts=DEFAULT_BIM_EXTENSIONS):
     WHERE p.id_guid=:pg
     """
     with models.engine.begin() as conn:
-        row = conn.execute(text(sql), {"pg": project_guid, "bim_exts": exts, "exclude_regex": DEFAULT_PROJECT_EXCLUDE_REGEX}).mappings().first()
+        row = conn.execute(text(sql), {"pg": project_guid, "bim_exts": exts, "fed_exts": FEDERATED_EXTENSIONS, "exclude_regex": DEFAULT_PROJECT_EXCLUDE_REGEX}).mappings().first()
     return dict(row) if row else None
 
 
@@ -170,6 +179,7 @@ def list_current_bim_items(project_guid, bim_exts=DEFAULT_BIM_EXTENSIONS):
         COUNT(*) OVER (PARTITION BY lower(COALESCE(i.item_name,''))) AS same_name_count,
         CASE
           WHEN lower(COALESCE(i.ext,''))='nwd' THEN 'NAVISWORKS_NWD'
+          WHEN lower(COALESCE(i.ext,''))='iwm' THEN 'INFRAWORKS_IWM'
           WHEN lower(COALESCE(i.ext,''))='nwc' THEN 'NAVISWORKS_CACHE'
           WHEN lower(COALESCE(i.ext,''))='rvt' THEN 'REVIT'
           WHEN lower(COALESCE(i.ext,''))='ifc' THEN 'IFC'
@@ -199,7 +209,7 @@ def list_current_bim_items(project_guid, bim_exts=DEFAULT_BIM_EXTENSIONS):
       AND lower(COALESCE(i.ext,''))=ANY(:bim_exts)
     ORDER BY
       CASE lower(COALESCE(i.ext,''))
-        WHEN 'nwd' THEN 1 WHEN 'rvt' THEN 2 WHEN 'ifc' THEN 3 WHEN 'nwc' THEN 4 ELSE 9
+        WHEN 'nwd' THEN 1 WHEN 'iwm' THEN 1 WHEN 'rvt' THEN 2 WHEN 'ifc' THEN 3 WHEN 'nwc' THEN 4 ELSE 9
       END,
       i.last_modified DESC NULLS LAST, i.item_name
     """
@@ -209,7 +219,7 @@ def list_current_bim_items(project_guid, bim_exts=DEFAULT_BIM_EXTENSIONS):
 
 
 def list_federated_candidates(project_guid, min_score=70, limit=8):
-    """Reduce los NWD a pocos candidatos gerenciales, agrupando copias por nombre."""
+    """Reduce los federados (NWD e IWM) a pocos candidatos gerenciales, agrupando copias por nombre."""
     sql = r"""
     WITH base AS (
       SELECT i.item_id, i.project_guid, i.folder_id, i.folder_path_cached, i.item_name,
@@ -221,7 +231,7 @@ def list_federated_candidates(project_guid, min_score=70, limit=8):
       JOIN public.acc_projects p ON p.id_guid=i.project_guid
       WHERE i.project_guid=:pg
         AND COALESCE(i.is_active,true)=true
-        AND lower(COALESCE(i.ext,''))='nwd'
+        AND lower(COALESCE(i.ext,''))=ANY(:fed_exts)
     ), features AS (
       SELECT b.*,
         CASE WHEN path_l LIKE '%%03_pub%%' THEN 'PUB'
@@ -265,7 +275,7 @@ def list_federated_candidates(project_guid, min_score=70, limit=8):
     ORDER BY candidate_score DESC, last_modified DESC NULLS LAST
     """
     with models.engine.begin() as conn:
-        rows = [dict(r) for r in conn.execute(text(sql), {"pg": project_guid}).mappings().all()]
+        rows = [dict(r) for r in conn.execute(text(sql), {"pg": project_guid, "fed_exts": FEDERATED_EXTENSIONS}).mappings().all()]
 
     strong = [r for r in rows if int(r.get("candidate_score") or 0) >= int(min_score)]
     selected = strong[:int(limit)] if strong else rows[:min(int(limit), 5)]
@@ -351,7 +361,7 @@ def get_bim_global_stats(bim_exts=DEFAULT_BIM_EXTENSIONS, exclude_regex=DEFAULT_
        ) AS projects_with_bim,
        COUNT(*) FILTER (
           WHERE COALESCE(i.is_active,true)
-            AND lower(COALESCE(i.ext,''))='nwd'
+            AND lower(COALESCE(i.ext,''))=ANY(:fed_exts)
        ) AS nwd_files,
        COUNT(*) FILTER (
           WHERE COALESCE(i.is_active,true)
@@ -375,7 +385,7 @@ def get_bim_global_stats(bim_exts=DEFAULT_BIM_EXTENSIONS, exclude_regex=DEFAULT_
     with models.engine.begin() as conn:
         row = conn.execute(
             text(sql),
-            {"bim_exts": exts, "exclude_regex": exclude_regex}
+            {"bim_exts": exts, "fed_exts": FEDERATED_EXTENSIONS, "exclude_regex": exclude_regex}
         ).mappings().first()
     return dict(row) if row else {}
 

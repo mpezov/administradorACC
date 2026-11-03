@@ -2,7 +2,7 @@ import hashlib
 import re
 from sqlalchemy import text
 from .. import models
-from .portal_db import DEFAULT_PROJECT_EXCLUDE_REGEX
+from .portal_db import DEFAULT_PROJECT_EXCLUDE_REGEX, FEDERATED_EXTENSIONS
 
 
 def schema_ready():
@@ -125,10 +125,11 @@ def select_managerial_model(project_guid, item_id):
             WHERE project_guid=:pg
               AND item_id=:item_id
               AND COALESCE(is_active,true)=true
-              AND lower(COALESCE(ext,''))='nwd'
-        """), {"pg": project_guid, "item_id": item_id}).mappings().first()
+              AND lower(COALESCE(ext,''))=ANY(:fed_exts)
+        """), {"pg": project_guid, "item_id": item_id, "fed_exts": FEDERATED_EXTENSIONS}).mappings().first()
         if not item:
-            raise ValueError("El item no es un NWD activo de este proyecto.")
+            raise ValueError("El item no es un federado activo (NWD o IWM) de este proyecto.")
+        formato = str(item["ext"] or "nwd").upper()
 
         conn.execute(text("""
             UPDATE public.bim_project_models SET is_default=false
@@ -147,11 +148,12 @@ def select_managerial_model(project_guid, item_id):
                 SET source_filename_cache=:name,
                     acc_folder_id_cache=:folder_id,
                     acc_folder_path_cache=:folder_path,
-                    format='NWD', is_default=true, enabled=true, updated_at=now()
+                    format=:formato, is_default=true, enabled=true, updated_at=now()
                 WHERE id=:id RETURNING *
             """), {
                 "id": existing["id"], "name": item["item_name"],
                 "folder_id": item["folder_id"], "folder_path": item["folder_path_cached"],
+                "formato": formato,
             }).mappings().first()
         else:
             digest = hashlib.sha1(item_id.encode("utf-8")).hexdigest()[:10].upper()
@@ -162,7 +164,7 @@ def select_managerial_model(project_guid, item_id):
                     format,is_default,enabled,download_policy,metadata
                 )
                 VALUES(:pid,:model_code,'MANAGERIAL',:item_id,:name,:folder_id,:folder_path,
-                       'NWD',true,true,'ON_DEMAND','{}'::jsonb)
+                       :formato,true,true,'ON_DEMAND','{}'::jsonb)
                 RETURNING *
             """), {
                 "pid": bp["id"], "model_code": f"MANAGERIAL-{digest}", "item_id": item_id,
