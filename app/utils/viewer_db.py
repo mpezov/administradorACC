@@ -169,7 +169,7 @@ def select_managerial_model(project_guid, item_id):
             """), {
                 "pid": bp["id"], "model_code": f"MANAGERIAL-{digest}", "item_id": item_id,
                 "name": item["item_name"], "folder_id": item["folder_id"],
-                "folder_path": item["folder_path_cached"],
+                "folder_path": item["folder_path_cached"], "formato": formato,
             }).mappings().first()
         return dict(model)
 
