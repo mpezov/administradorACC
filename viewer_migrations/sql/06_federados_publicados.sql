@@ -1,9 +1,9 @@
--- 06 · Varios federados publicados por proyecto (tramos de proyectos lineales)
+-- 06 · Varios federados publicados por proyecto (tramos, especialidades…)
 --
 -- Hasta la v0.5 el visor mostraba un único federado por proyecto: el modelo
 -- MANAGERIAL marcado is_default. Los proyectos lineales se federan por tramos,
 -- así que ahora cada modelo MANAGERIAL puede marcarse como "publicado" en el
--- visor, con una etiqueta (p. ej. "Tramo 1") y un orden. El modelo principal
+-- visor, con un orden y una etiqueta opcional (por defecto, el nombre del archivo). El modelo principal
 -- (is_default) se publica siempre. La vista v_bim_viewer_state no cambia.
 --
 -- Solo agrega columnas y una vista: no modifica datos existentes.

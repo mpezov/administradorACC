@@ -154,7 +154,7 @@
   <div class="section-head">
     <div>
       <h2>Federados publicados en el visor</h2>
-      <p>Los proyectos lineales se federan por tramos: el visor ANIN 360 muestra todos los modelos de esta lista, con su etiqueta y en este orden. El modelo gerencial (principal) siempre está incluido.</p>
+      <p>Un proyecto puede publicar varios federados (por ejemplo, tramos en proyectos lineales o especialidades en edificaciones grandes). El visor ANIN 360 los ofrece en "Más modelos" con el nombre del archivo, en este orden; la etiqueta es opcional y reemplaza ese nombre. El modelo gerencial (principal) siempre está incluido.</p>
     </div>
     {% if published_models %}
     <form method="post" action="/admin/project/{{ project.project_guid }}/viewer/check-all">
@@ -175,7 +175,7 @@
           <form method="post" action="/admin/project/{{ project.project_guid }}/viewer/label" style="display:flex;gap:6px;align-items:center">
             <input type="hidden" name="model_id" value="{{ m.model_id }}">
             <input name="orden" value="{{ m.orden if m.orden is not none and m.orden < 999 else '' }}" size="3" title="Orden">
-            <input name="etiqueta" value="{{ m.etiqueta if m.etiqueta != m.item_name else '' }}" placeholder="p. ej. Tramo 1" size="18">
+            <input name="etiqueta" value="{{ m.etiqueta if m.etiqueta != m.item_name else '' }}" placeholder="opcional" size="18">
             <button class="table-select" type="submit">Guardar</button>
           </form>
         </td>

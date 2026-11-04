@@ -182,9 +182,10 @@ def select_managerial_model(project_guid, item_id):
 # ---------------------------------------------------------------------------
 # Varios federados publicados por proyecto (migración 06_federados_publicados)
 #
-# Los proyectos lineales se federan por tramos: además del modelo principal
-# (is_default) se pueden publicar otros modelos MANAGERIAL en el visor, cada uno
-# con una etiqueta ("Tramo 1") y un orden. El visor ANIN 360 los lee de la vista
+# Un proyecto puede publicar varios federados (tramos en proyectos lineales,
+# especialidades en edificaciones grandes): además del modelo principal
+# (is_default) se pueden publicar otros modelos MANAGERIAL en el visor, con un
+# orden y una etiqueta opcional (por defecto, el nombre del archivo). El visor ANIN 360 los lee de la vista
 # public.v_bim_viewer_models.
 # ---------------------------------------------------------------------------
 
@@ -198,15 +199,6 @@ def published_schema_ready(conn=None):
         return conn.execute(sql).first() is not None
     with models.engine.begin() as c:
         return c.execute(sql).first() is not None
-
-
-def suggest_label(item_name, folder_path):
-    """Etiqueta sugerida a partir de la ruta o el nombre: "Tramo 1", "Tramo 2"..."""
-    for texto in (folder_path or "", item_name or ""):
-        m = re.search(r"tramo[\s_-]*0*(\d+)", texto, re.IGNORECASE)
-        if m:
-            return f"Tramo {int(m.group(1))}"
-    return None
 
 
 def publish_model(project_guid, item_id, etiqueta=None):
@@ -226,7 +218,8 @@ def publish_model(project_guid, item_id, etiqueta=None):
         if not item:
             raise ValueError("El item no es un federado activo (NWD o IWM) de este proyecto.")
         formato = str(item["ext"] or "nwd").upper()
-        etiqueta = (etiqueta or "").strip() or suggest_label(item["item_name"], item["folder_path_cached"])
+        # Sin etiqueta, el visor muestra el nombre del archivo base.
+        etiqueta = (etiqueta or "").strip() or None
         orden = conn.execute(text("""
             SELECT COALESCE(MAX(orden), 0) + 1 FROM public.bim_project_models
             WHERE project_id=:pid AND model_role='MANAGERIAL' AND (publicado OR is_default)
