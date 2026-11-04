@@ -21,6 +21,10 @@ from ..utils.viewer_db import (
     get_local_mirror,
     refresh_selected_remote,
     get_viewer_model,
+    publish_model,
+    unpublish_model,
+    label_model,
+    refresh_published_remote,
 )
 
 viewer_bp = Blueprint("viewer_manager", __name__)
@@ -59,6 +63,64 @@ def select_viewer_model(project_guid):
     return redirect(
         url_for("portfolio.project_detail", project_guid=project_guid, viewer="selected")
     )
+
+
+def _ficha(project_guid, **args):
+    return redirect(url_for("portfolio.project_detail", project_guid=project_guid, **args))
+
+
+@viewer_bp.post("/project/<project_guid>/viewer/publish")
+def publish_viewer_model(project_guid):
+    """Agrega un federado a la lista publicada en el visor (tramos), sin cambiar el principal."""
+    item_id = (request.form.get("item_id") or "").strip()
+    if not item_id:
+        return "Falta item_id.", 400
+    try:
+        publish_model(project_guid, item_id, request.form.get("etiqueta"))
+        try:
+            refresh_published_remote(project_guid, resolve_acc_derivative)
+        except Exception:
+            # La publicación queda registrada aunque APS no responda ahora.
+            pass
+    except (ValueError, RuntimeError) as exc:
+        return _ficha(project_guid, viewer_error=str(exc))
+    return _ficha(project_guid, viewer="published")
+
+
+@viewer_bp.post("/project/<project_guid>/viewer/unpublish")
+def unpublish_viewer_model(project_guid):
+    """Quita un federado del visor (el principal no se puede quitar)."""
+    try:
+        unpublish_model(project_guid, int(request.form.get("model_id") or 0))
+    except ValueError as exc:
+        return _ficha(project_guid, viewer_error=str(exc))
+    return _ficha(project_guid, viewer="unpublished")
+
+
+@viewer_bp.post("/project/<project_guid>/viewer/label")
+def label_viewer_model(project_guid):
+    """Guarda la etiqueta y el orden con que el federado aparece en el visor."""
+    try:
+        orden_txt = (request.form.get("orden") or "").strip()
+        label_model(
+            project_guid,
+            int(request.form.get("model_id") or 0),
+            request.form.get("etiqueta"),
+            int(orden_txt) if orden_txt.isdigit() else None,
+        )
+    except ValueError as exc:
+        return _ficha(project_guid, viewer_error=str(exc))
+    return _ficha(project_guid, viewer="labeled")
+
+
+@viewer_bp.post("/project/<project_guid>/viewer/check-all")
+def check_published_models(project_guid):
+    """Verifica en Autodesk el derivado de todos los federados publicados."""
+    try:
+        refresh_published_remote(project_guid, resolve_acc_derivative)
+    except Exception as exc:
+        return _ficha(project_guid, viewer_error=str(exc))
+    return _ficha(project_guid, viewer="checked")
 
 
 @viewer_bp.post("/project/<project_guid>/viewer/check")

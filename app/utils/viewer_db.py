@@ -171,7 +171,161 @@ def select_managerial_model(project_guid, item_id):
                 "name": item["item_name"], "folder_id": item["folder_id"],
                 "folder_path": item["folder_path_cached"], "formato": formato,
             }).mappings().first()
+        if published_schema_ready(conn):
+            # El principal siempre queda publicado en el visor.
+            conn.execute(text(
+                "UPDATE public.bim_project_models SET publicado=true WHERE id=:id"
+            ), {"id": model["id"]})
         return dict(model)
+
+
+# ---------------------------------------------------------------------------
+# Varios federados publicados por proyecto (migración 06_federados_publicados)
+#
+# Los proyectos lineales se federan por tramos: además del modelo principal
+# (is_default) se pueden publicar otros modelos MANAGERIAL en el visor, cada uno
+# con una etiqueta ("Tramo 1") y un orden. El visor ANIN 360 los lee de la vista
+# public.v_bim_viewer_models.
+# ---------------------------------------------------------------------------
+
+def published_schema_ready(conn=None):
+    """True si existe la columna bim_project_models.publicado (migración 06)."""
+    sql = text("""
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema='public' AND table_name='bim_project_models' AND column_name='publicado'
+    """)
+    if conn is not None:
+        return conn.execute(sql).first() is not None
+    with models.engine.begin() as c:
+        return c.execute(sql).first() is not None
+
+
+def suggest_label(item_name, folder_path):
+    """Etiqueta sugerida a partir de la ruta o el nombre: "Tramo 1", "Tramo 2"..."""
+    for texto in (folder_path or "", item_name or ""):
+        m = re.search(r"tramo[\s_-]*0*(\d+)", texto, re.IGNORECASE)
+        if m:
+            return f"Tramo {int(m.group(1))}"
+    return None
+
+
+def publish_model(project_guid, item_id, etiqueta=None):
+    """Publica un federado más en el visor (sin cambiar el principal)."""
+    if not schema_ready() or not published_schema_ready():
+        raise RuntimeError("Falta la migración 06 (python migrar_federados_publicados.py).")
+
+    with models.engine.begin() as conn:
+        bp = ensure_bim_project(conn, project_guid)
+        item = conn.execute(text("""
+            SELECT item_id, item_name, ext, folder_id, folder_path_cached
+            FROM public.acc_items
+            WHERE project_guid=:pg AND item_id=:item_id
+              AND COALESCE(is_active,true)=true
+              AND lower(COALESCE(ext,''))=ANY(:fed_exts)
+        """), {"pg": project_guid, "item_id": item_id, "fed_exts": FEDERATED_EXTENSIONS}).mappings().first()
+        if not item:
+            raise ValueError("El item no es un federado activo (NWD o IWM) de este proyecto.")
+        formato = str(item["ext"] or "nwd").upper()
+        etiqueta = (etiqueta or "").strip() or suggest_label(item["item_name"], item["folder_path_cached"])
+        orden = conn.execute(text("""
+            SELECT COALESCE(MAX(orden), 0) + 1 FROM public.bim_project_models
+            WHERE project_id=:pid AND model_role='MANAGERIAL' AND (publicado OR is_default)
+        """), {"pid": bp["id"]}).scalar()
+        hay_principal = conn.execute(text("""
+            SELECT 1 FROM public.bim_project_models
+            WHERE project_id=:pid AND model_role='MANAGERIAL' AND is_default AND enabled
+        """), {"pid": bp["id"]}).first() is not None
+
+        existing = conn.execute(text("""
+            SELECT * FROM public.bim_project_models
+            WHERE project_id=:pid AND acc_item_id=:item_id AND model_role='MANAGERIAL'
+            ORDER BY id LIMIT 1
+        """), {"pid": bp["id"], "item_id": item_id}).mappings().first()
+        if existing:
+            model = conn.execute(text("""
+                UPDATE public.bim_project_models
+                SET publicado=true, enabled=true, format=:formato,
+                    etiqueta=COALESCE(:etiqueta, etiqueta),
+                    orden=COALESCE(orden, :orden), updated_at=now()
+                WHERE id=:id RETURNING *
+            """), {"id": existing["id"], "formato": formato, "etiqueta": etiqueta, "orden": orden}).mappings().first()
+        else:
+            digest = hashlib.sha1(item_id.encode("utf-8")).hexdigest()[:10].upper()
+            model = conn.execute(text("""
+                INSERT INTO public.bim_project_models(
+                    project_id,model_code,model_role,acc_item_id,
+                    source_filename_cache,acc_folder_id_cache,acc_folder_path_cache,
+                    format,is_default,enabled,download_policy,metadata,publicado,etiqueta,orden
+                )
+                VALUES(:pid,:model_code,'MANAGERIAL',:item_id,:name,:folder_id,:folder_path,
+                       :formato,:principal,true,'ON_DEMAND','{}'::jsonb,true,:etiqueta,:orden)
+                RETURNING *
+            """), {
+                "pid": bp["id"], "model_code": f"MANAGERIAL-{digest}", "item_id": item_id,
+                "name": item["item_name"], "folder_id": item["folder_id"],
+                "folder_path": item["folder_path_cached"], "formato": formato,
+                # Si el proyecto aún no tiene principal, el primero publicado lo es.
+                "principal": not hay_principal, "etiqueta": etiqueta, "orden": orden,
+            }).mappings().first()
+        return dict(model)
+
+
+def _model_of_project(conn, project_guid, model_id):
+    return conn.execute(text("""
+        SELECT m.* FROM public.bim_project_models m
+        JOIN public.bim_projects bp ON bp.id=m.project_id
+        WHERE bp.acc_project_guid=:pg AND m.id=:mid
+    """), {"pg": project_guid, "mid": model_id}).mappings().first()
+
+
+def unpublish_model(project_guid, model_id):
+    """Quita un federado del visor. El principal no se puede quitar: primero se elige otro."""
+    with models.engine.begin() as conn:
+        m = _model_of_project(conn, project_guid, model_id)
+        if not m:
+            raise ValueError("El modelo no pertenece a este proyecto.")
+        if m["is_default"]:
+            raise ValueError("Es el modelo principal: seleccione otro como principal antes de quitarlo.")
+        conn.execute(text(
+            "UPDATE public.bim_project_models SET publicado=false, updated_at=now() WHERE id=:id"
+        ), {"id": model_id})
+
+
+def label_model(project_guid, model_id, etiqueta, orden):
+    """Cambia la etiqueta y el orden con que el modelo aparece en el visor."""
+    with models.engine.begin() as conn:
+        if not _model_of_project(conn, project_guid, model_id):
+            raise ValueError("El modelo no pertenece a este proyecto.")
+        conn.execute(text("""
+            UPDATE public.bim_project_models
+            SET etiqueta=NULLIF(btrim(:etiqueta), ''), orden=:orden, updated_at=now()
+            WHERE id=:id
+        """), {"id": model_id, "etiqueta": etiqueta or "", "orden": orden})
+
+
+def list_published_models(project_guid):
+    """Federados que se muestran en el visor para este proyecto ACC (principal primero)."""
+    with models.engine.begin() as conn:
+        if conn.execute(text("SELECT to_regclass('public.v_bim_viewer_models')")).scalar() is None:
+            return []
+        rows = conn.execute(text("""
+            SELECT * FROM public.v_bim_viewer_models
+            WHERE acc_project_guid=:pg
+            ORDER BY is_default DESC, orden, model_id
+        """), {"pg": project_guid}).mappings().all()
+    return [dict(r) for r in rows]
+
+
+def refresh_published_remote(project_guid, resolver):
+    """Verifica en Autodesk el derivado de cada federado publicado; devuelve cuántos quedaron listos."""
+    listos = 0
+    for m in list_published_models(project_guid):
+        if not m.get("acc_latest_version_id"):
+            continue
+        result = resolver(project_guid, m["acc_latest_version_id"])
+        cache_remote_result(m["model_id"], m["acc_latest_version_id"], m.get("acc_last_modified"), result)
+        listos += 1 if result.get("status") == "READY" else 0
+    return listos
 
 
 def get_selected_model(project_guid):

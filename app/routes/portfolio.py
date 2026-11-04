@@ -5,6 +5,7 @@ from ..utils.viewer_db import (
     mirror_schema_ready,
     get_selected_model,
     get_local_mirror,
+    list_published_models,
 )
 from ..utils.portal_db import (
     DEFAULT_PROJECT_EXCLUDE_REGEX,
@@ -84,6 +85,7 @@ def project_detail(project_guid):
         viewer_catalog_ready=catalog_ready,
         mirror_schema_ready=mirror_schema_ready(),
         selected_model=selected,
+        published_models=list_published_models(project_guid) if catalog_ready else [],
         mirror_state=mirror,
         mirror_notice=(request.args.get("mirror") or ""),
         viewer_notice=(request.args.get("viewer") or ""),
