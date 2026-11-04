@@ -91,6 +91,8 @@ def create_app():
     app.register_blueprint(api_bp, url_prefix="/admin/api")
     app.register_blueprint(portfolio_bp, url_prefix="/admin")
     app.register_blueprint(viewer_bp, url_prefix="/admin")
+    from .routes.indicadores import indicadores_bp
+    app.register_blueprint(indicadores_bp, url_prefix="/admin")
 
     if os.getenv("ENABLE_SCHEDULER", "false").lower() == "true":
         from apscheduler.schedulers.background import BackgroundScheduler

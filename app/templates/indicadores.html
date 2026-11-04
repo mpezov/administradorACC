@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="viewer-manager">
+  <div class="section-head">
+    <div>
+      <h2>Indicadores de proyectos</h2>
+      <p>Actualiza la ficha de los proyectos en el visor ANIN 360 (avances, costos, fechas, etapa) con el CSV de la hoja <b>DATA-VAL2</b> exportado del Drive, por ejemplo <code>proyectos4-11.csv</code>. Solo se cargan los proyectos marcados <b>SI</b> en "Considerar visor BIM". Provisional hasta que la OTI entregue una API.</p>
+    </div>
+  </div>
+
+  {% if ok %}<div class="viewer-message ok">{{ ok }} {% if cache == '1' %}El visor ya muestra los datos nuevos.{% else %}El visor los mostrará en unos minutos (al vencer su caché).{% endif %}</div>{% endif %}
+  {% if error %}<div class="viewer-message error">{{ error }}</div>{% endif %}
+
+  <div class="inventory-strip">
+    {% if actual %}
+      <div><strong>{{ actual.filas }}</strong><span>Registros cargados</span></div>
+      <div><strong>{{ actual.wbs }}</strong><span>WBS</span></div>
+      <div><strong>{{ actual.fuente or '—' }}</strong><span>Último archivo</span></div>
+      <div><strong>{{ actual.cargado_en.strftime('%d/%m/%Y %H:%M') if actual.cargado_en else '—' }}</strong><span>Cargado (UTC)</span></div>
+    {% else %}
+      <div><strong>—</strong><span>Aún no hay indicadores cargados</span></div>
+    {% endif %}
+  </div>
+
+  {% if previa %}
+    <div class="selected-model-card" style="display:block">
+      <span class="selected-label">VISTA PREVIA · {{ previa.nombre }}</span>
+      <h3>{{ previa.filas }} registros · {{ previa.wbs }} WBS</h3>
+      {% if previa.caida %}<div class="viewer-message error">Atención: el archivo trae menos de la mitad de los registros actuales ({{ actual.filas }}). Revise que sea la hoja completa antes de confirmar.</div>{% endif %}
+      <div class="table-container"><table class="stats-table">
+        <thead><tr><th>WBS</th><th>CUI</th><th>Proyecto</th><th>Etapa</th><th>Av. diseño</th><th>Av. construcción</th><th>Costo Invierte</th><th>Devengado</th></tr></thead>
+        <tbody>{% for f in previa.muestra %}<tr>
+          <td>{{ f.wbs }}</td><td>{{ f.cui or '—' }}</td><td>{{ f.nombre_corto or '—' }}</td><td>{{ f.etapa or '—' }}</td>
+          <td>{{ f.avance_diseno|pct }}</td><td>{{ f.avance_construccion|pct }}</td>
+          <td>{{ '{:,.0f}'.format(f.costo_actualizado) if f.costo_actualizado is not none else '—' }}</td>
+          <td>{{ '{:,.0f}'.format(f.devengado_acumulado) if f.devengado_acumulado is not none else '—' }}</td>
+        </tr>{% endfor %}</tbody>
+      </table></div>
+      <p class="small-muted">Primeros {{ previa.muestra|length }} registros. Al confirmar se guarda una copia de la carga actual y la tabla se reemplaza completa.</p>
+      <div class="viewer-actions">
+        <form method="post" action="/admin/indicadores/cargar">
+          <input type="hidden" name="token" value="{{ previa.token }}">
+          <input type="hidden" name="nombre" value="{{ previa.nombre }}">
+          <button class="btn-viewer" type="submit">Confirmar y actualizar indicadores</button>
+        </form>
+        <a class="btn-secondary" href="/admin/indicadores">Cancelar</a>
+      </div>
+    </div>
+  {% else %}
+    <form method="post" action="/admin/indicadores/previa" enctype="multipart/form-data" class="viewer-actions">
+      <input type="file" name="archivo" accept=".csv,text/csv" required>
+      <button class="btn-viewer" type="submit">Revisar archivo</button>
+    </form>
+  {% endif %}
+
+  {% if actual and actual.respaldo and actual.respaldo.filas %}
+    <form method="post" action="/admin/indicadores/restaurar" style="margin-top:14px" onsubmit="return confirm('¿Volver a la carga anterior ({{ actual.respaldo.fuente or 'sin nombre' }})?')">
+      <button class="btn-secondary" type="submit">Deshacer la última carga (volver a {{ actual.respaldo.fuente or 'la anterior' }}, {{ actual.respaldo.filas }} registros)</button>
+    </form>
+  {% endif %}
+</section>
+{% endblock %}
