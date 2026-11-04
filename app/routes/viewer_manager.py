@@ -71,7 +71,7 @@ def _ficha(project_guid, **args):
 
 @viewer_bp.post("/project/<project_guid>/viewer/publish")
 def publish_viewer_model(project_guid):
-    """Agrega un federado a la lista publicada en el visor (tramos), sin cambiar el principal."""
+    """Agrega un federado al final de la lista del visor (el primero es el principal)."""
     item_id = (request.form.get("item_id") or "").strip()
     if not item_id:
         return "Falta item_id.", 400
@@ -89,7 +89,7 @@ def publish_viewer_model(project_guid):
 
 @viewer_bp.post("/project/<project_guid>/viewer/unpublish")
 def unpublish_viewer_model(project_guid):
-    """Quita un federado del visor (el principal no se puede quitar)."""
+    """Quita un federado de la lista (si era el primero, el siguiente pasa a ser el principal)."""
     try:
         unpublish_model(project_guid, int(request.form.get("model_id") or 0))
     except ValueError as exc:
@@ -108,6 +108,12 @@ def label_viewer_model(project_guid):
             request.form.get("etiqueta"),
             int(orden_txt) if orden_txt.isdigit() else None,
         )
+        if request.form.get("orden") == "1":
+            # Pasó a ser el principal: se verifica su derivado como antes al seleccionarlo.
+            try:
+                refresh_selected_remote(project_guid, resolve_acc_derivative)
+            except Exception:
+                pass
     except ValueError as exc:
         return _ficha(project_guid, viewer_error=str(exc))
     return _ficha(project_guid, viewer="labeled")

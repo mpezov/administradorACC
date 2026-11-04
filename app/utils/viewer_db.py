@@ -176,6 +176,8 @@ def select_managerial_model(project_guid, item_id):
             conn.execute(text(
                 "UPDATE public.bim_project_models SET publicado=true WHERE id=:id"
             ), {"id": model["id"]})
+            # Elegirlo como principal lo deja primero en la lista del visor.
+            _ordenar_publicados(conn, bp["id"], model["id"], 1)
         return dict(model)
 
 
@@ -202,7 +204,7 @@ def published_schema_ready(conn=None):
 
 
 def publish_model(project_guid, item_id, etiqueta=None):
-    """Publica un federado más en el visor (sin cambiar el principal)."""
+    """Agrega un federado al final de la lista del visor (el primero de la lista es el principal)."""
     if not schema_ready() or not published_schema_ready():
         raise RuntimeError("Falta la migración 06 (python migrar_federados_publicados.py).")
 
@@ -260,7 +262,34 @@ def publish_model(project_guid, item_id, etiqueta=None):
                 # Si el proyecto aún no tiene principal, el primero publicado lo es.
                 "principal": not hay_principal, "etiqueta": etiqueta, "orden": orden,
             }).mappings().first()
+        _ordenar_publicados(conn, bp["id"])
         return dict(model)
+
+
+def _ordenar_publicados(conn, project_id, mover_id=None, posicion=None):
+    """
+    Renumera la lista publicada (1, 2, 3…) y deja como principal (is_default)
+    al primero. Con mover_id/posicion, antes mueve ese modelo a esa posición.
+    """
+    ids = [r[0] for r in conn.execute(text("""
+        SELECT id FROM public.bim_project_models
+        WHERE project_id=:pid AND model_role='MANAGERIAL' AND enabled AND (publicado OR is_default)
+        ORDER BY COALESCE(orden, CASE WHEN is_default THEN 0 ELSE 999 END), is_default DESC, id
+    """), {"pid": project_id}).all()]
+    if mover_id in ids and posicion:
+        ids.remove(mover_id)
+        ids.insert(max(0, min(len(ids), posicion - 1)), mover_id)
+    # Primero se apaga el principal actual (índice único de un principal por proyecto).
+    conn.execute(text("""
+        UPDATE public.bim_project_models SET is_default=false
+        WHERE project_id=:pid AND model_role='MANAGERIAL' AND is_default
+    """), {"pid": project_id})
+    for n, mid in enumerate(ids, start=1):
+        conn.execute(text("""
+            UPDATE public.bim_project_models
+            SET orden=:n, publicado=true, is_default=:principal, updated_at=now()
+            WHERE id=:id
+        """), {"id": mid, "n": n, "principal": n == 1})
 
 
 def _model_of_project(conn, project_guid, model_id):
@@ -272,28 +301,37 @@ def _model_of_project(conn, project_guid, model_id):
 
 
 def unpublish_model(project_guid, model_id):
-    """Quita un federado del visor. El principal no se puede quitar: primero se elige otro."""
+    """Quita un federado de la lista; si era el primero, el siguiente pasa a ser el principal."""
     with models.engine.begin() as conn:
         m = _model_of_project(conn, project_guid, model_id)
         if not m:
             raise ValueError("El modelo no pertenece a este proyecto.")
-        if m["is_default"]:
-            raise ValueError("Es el modelo principal: seleccione otro como principal antes de quitarlo.")
-        conn.execute(text(
-            "UPDATE public.bim_project_models SET publicado=false, updated_at=now() WHERE id=:id"
-        ), {"id": model_id})
+        otros = conn.execute(text("""
+            SELECT count(*) FROM public.bim_project_models
+            WHERE project_id=:pid AND model_role='MANAGERIAL' AND enabled
+              AND (publicado OR is_default) AND id<>:id
+        """), {"pid": m["project_id"], "id": model_id}).scalar()
+        if not otros:
+            raise ValueError("Es el único federado de la lista: agregue otro antes de quitarlo.")
+        conn.execute(text("""
+            UPDATE public.bim_project_models
+            SET publicado=false, is_default=false, orden=NULL, updated_at=now() WHERE id=:id
+        """), {"id": model_id})
+        _ordenar_publicados(conn, m["project_id"])
 
 
 def label_model(project_guid, model_id, etiqueta, orden):
-    """Cambia la etiqueta y el orden con que el modelo aparece en el visor."""
+    """Cambia la etiqueta y la posición en la lista (la posición 1 es el principal)."""
     with models.engine.begin() as conn:
-        if not _model_of_project(conn, project_guid, model_id):
+        m = _model_of_project(conn, project_guid, model_id)
+        if not m:
             raise ValueError("El modelo no pertenece a este proyecto.")
         conn.execute(text("""
             UPDATE public.bim_project_models
-            SET etiqueta=NULLIF(btrim(:etiqueta), ''), orden=:orden, updated_at=now()
+            SET etiqueta=NULLIF(btrim(:etiqueta), ''), updated_at=now()
             WHERE id=:id
-        """), {"id": model_id, "etiqueta": etiqueta or "", "orden": orden})
+        """), {"id": model_id, "etiqueta": etiqueta or ""})
+        _ordenar_publicados(conn, m["project_id"], model_id, orden)
 
 
 def list_published_models(project_guid):
